@@ -77,4 +77,35 @@ spec:
       targetPort: http
   type: ClusterIP
 
-
+---
+# Ingress: LIDAR Module Frontend Assets
+# Routes /modules/lidar/* to the lidar-frontend-service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lidar-module-ingress
+  namespace: nekazari
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  labels:
+    app: lidar-frontend
+    module: lidar
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - nekazari.artotxiki.com
+      secretName: nekazari-tls
+  rules:
+    - host: nekazari.artotxiki.com
+      http:
+        paths:
+          - path: /modules/lidar
+            pathType: Prefix
+            backend:
+              service:
+                name: lidar-frontend-service
+                port:
+                  number: 80
