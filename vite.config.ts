@@ -26,7 +26,7 @@ export default defineConfig({
         'react': {
           singleton: true,
           requiredVersion: '^18.3.1',
-          import: false,  // Use global from host
+          import: false,
           shareScope: 'default',
         },
         'react-dom': {
@@ -40,6 +40,16 @@ export default defineConfig({
           requiredVersion: '^6.26.0',
           import: false,
           shareScope: 'default',
+        },
+        '@nekazari/ui-kit': {
+          singleton: true,
+          requiredVersion: '^1.0.0',
+          import: false,
+          shareScope: 'default',
+        },
+        '@nekazari/sdk': {
+          singleton: false,
+          requiredVersion: '^1.0.0',
         },
       },
     }),
