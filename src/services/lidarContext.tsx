@@ -9,7 +9,7 @@
  */
 
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
-import { useViewer } from '@nekazari/sdk';
+import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
 
 /**

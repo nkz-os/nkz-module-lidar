@@ -47,10 +47,8 @@ export default defineConfig({
           import: false,
           shareScope: 'default',
         },
-        '@nekazari/sdk': {
-          singleton: false,
-          requiredVersion: '^1.0.0',
-        },
+        // Note: @nekazari/sdk is implemented locally in src/sdk/
+        // It connects to window.__nekazariViewerContext provided by the host
       },
     }),
   ],
