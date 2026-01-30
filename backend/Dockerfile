@@ -47,3 +47,4 @@ EXPOSE 8000
 # Default command: Run the API server
 # For worker, override with: ["python", "-m", "app.worker"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

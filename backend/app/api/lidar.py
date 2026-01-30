@@ -533,3 +533,4 @@ async def get_cache_stats(
         "cache": stats,
         "description": "Tiles are cached in MinIO to avoid re-downloading for overlapping parcels"
     }
+

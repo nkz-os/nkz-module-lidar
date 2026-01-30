@@ -23,6 +23,7 @@ INSERT INTO marketplace_modules (
     module_type,
     required_plan_type,
     pricing_tier,
+    is_local,
     is_active,
     required_roles,
     metadata
@@ -43,6 +44,7 @@ INSERT INTO marketplace_modules (
     'ADDON_PAID',
     'premium',
     'PAID',
+    false,
     true,
     ARRAY['Farmer', 'TenantAdmin', 'TechnicalConsultant', 'PlatformAdmin'],
     '{
@@ -104,3 +106,4 @@ INSERT INTO marketplace_modules (
 SELECT id, name, display_name, version, is_active, route_path, module_type 
 FROM marketplace_modules 
 WHERE id = 'lidar';
+

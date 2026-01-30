@@ -87,3 +87,4 @@ export const lidarSlots: ModuleViewerSlots = {
  */
 export const viewerSlots = lidarSlots;
 export default lidarSlots;
+

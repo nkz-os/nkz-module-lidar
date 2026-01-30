@@ -94,3 +94,4 @@ async def require_auth(
     payload = await verify_token(token)
     return payload
 
+

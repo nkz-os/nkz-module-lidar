@@ -26,6 +26,10 @@ import numpy as np
 import pdal
 import rasterio
 from rasterio.warp import transform_bounds
+from rasterio.features import shapes
+from shapely.geometry import shape, mapping
+from shapely.ops import transform as shapely_transform
+import pyproj
 from scipy import ndimage
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
@@ -388,35 +392,96 @@ class LidarPipeline:
         # Run watershed
         labels = watershed(-chm_smooth, markers, mask=chm_smooth > 0)
         
-        # Step 6: Extract tree properties
+        # Step 6: Extract tree properties with canopy polygons
         self.detected_trees = []
-        
+
+        # Setup coordinate transformation if needed (raster CRS to WGS84)
+        raster_crs = crs
+        target_crs = pyproj.CRS("EPSG:4326")
+
+        # Create transformer if CRS is not already WGS84
+        transformer = None
+        if raster_crs and raster_crs != target_crs:
+            try:
+                transformer = pyproj.Transformer.from_crs(
+                    raster_crs, target_crs, always_xy=True
+                )
+            except Exception as e:
+                logger.warning(f"Could not create CRS transformer: {e}")
+
+        # Vectorize watershed labels to get canopy polygons
+        logger.info("Extracting canopy polygons from watershed...")
+        canopy_polygons = {}
+
+        try:
+            # Use rasterio.features.shapes to vectorize the labels
+            for geom, value in shapes(labels.astype(np.int32), transform=transform):
+                if value > 0:  # Skip background (0)
+                    canopy_polygons[int(value)] = shape(geom)
+        except Exception as e:
+            logger.warning(f"Could not vectorize canopy polygons: {e}")
+
         for idx, (row, col) in enumerate(coordinates, start=1):
-            # Get pixel coordinates
+            # Get pixel coordinates in raster CRS
             px_x = transform.c + col * transform.a
             px_y = transform.f + row * transform.e
-            
+
             # Get tree height at peak
             height = float(chm[row, col])
-            
+
             # Get crown area (count pixels with this label)
             crown_pixels = np.sum(labels == idx)
             crown_area = crown_pixels * (chm_resolution ** 2)  # m²
             crown_diameter = np.sqrt(crown_area / np.pi) * 2  # Approximate diameter
-            
+
+            # Transform coordinates to WGS84 if transformer available
+            lon, lat = px_x, px_y
+            if transformer:
+                try:
+                    lon, lat = transformer.transform(px_x, px_y)
+                except Exception:
+                    pass
+
             tree = {
                 "id": f"tree_{idx}",
                 "location": {
                     "type": "Point",
-                    "coordinates": [float(px_x), float(px_y)]
+                    "coordinates": [round(lon, 7), round(lat, 7)]
                 },
                 "height": round(height, 2),
                 "crown_diameter": round(crown_diameter, 2),
                 "crown_area": round(crown_area, 2)
             }
+
+            # Add canopy polygon if available
+            if idx in canopy_polygons:
+                canopy_geom = canopy_polygons[idx]
+
+                # Simplify polygon slightly to reduce size (tolerance ~10cm)
+                canopy_geom = canopy_geom.simplify(0.1, preserve_topology=True)
+
+                # Transform to WGS84 if needed
+                if transformer:
+                    try:
+                        canopy_geom = shapely_transform(
+                            lambda x, y: transformer.transform(x, y),
+                            canopy_geom
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not transform canopy polygon: {e}")
+
+                # Only include if polygon is valid
+                if canopy_geom.is_valid and not canopy_geom.is_empty:
+                    # Round coordinates to 7 decimal places
+                    canopy_coords = mapping(canopy_geom)
+                    tree["canopy_geometry"] = {
+                        "type": canopy_coords["type"],
+                        "coordinates": canopy_coords["coordinates"]
+                    }
+
             self.detected_trees.append(tree)
-        
-        logger.info(f"Phase C complete. Detected {len(self.detected_trees)} trees")
+
+        logger.info(f"Phase C complete. Detected {len(self.detected_trees)} trees with canopy polygons")
     
     def phase_d_tiling(self):
         """
@@ -553,6 +618,7 @@ class LidarPipeline:
             
             # Create AgriTree entities for detected trees
             if self.detected_trees and config.get("detect_trees", False):
+                trees_created = 0
                 for tree in self.detected_trees[:100]:  # Limit to 100 trees per batch
                     tree_entity = {
                         "@context": context,
@@ -565,9 +631,18 @@ class LidarPipeline:
                         "location": {"type": "GeoProperty", "value": tree["location"]},
                         "height": {"type": "Property", "value": tree["height"], "unitCode": "MTR"},
                         "crownDiameter": {"type": "Property", "value": tree.get("crown_diameter", 0), "unitCode": "MTR"},
-                        "crownArea": {"type": "Property", "value": tree.get("crown_area", 0), "unitCode": "MTK"}
+                        "crownArea": {"type": "Property", "value": tree.get("crown_area", 0), "unitCode": "MTK"},
+                        "source": {"type": "Property", "value": config.get("source", "LIDAR_PNOA")},
+                        "dateDetected": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"}
                     }
-                    
+
+                    # Add canopy geometry if available (required for zonal stats)
+                    if "canopy_geometry" in tree and tree["canopy_geometry"]:
+                        tree_entity["canopyGeometry"] = {
+                            "type": "GeoProperty",
+                            "value": tree["canopy_geometry"]
+                        }
+
                     try:
                         with httpx.Client(timeout=10.0) as client:
                             response = client.post(
@@ -575,12 +650,14 @@ class LidarPipeline:
                                 json=tree_entity,
                                 headers=headers
                             )
-                            if response.status_code not in (201, 204):
+                            if response.status_code in (201, 204):
+                                trees_created += 1
+                            else:
                                 logger.debug(f"Tree entity creation: {response.status_code}")
                     except Exception as e:
                         logger.debug(f"Tree entity creation failed: {e}")
-                
-                logger.info(f"Created AgriTree entities: {min(len(self.detected_trees), 100)}")
+
+                logger.info(f"Created {trees_created} AgriTree entities with canopy polygons")
             
         finally:
             db.close()
