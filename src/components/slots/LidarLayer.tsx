@@ -83,6 +83,8 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
 
   /**
    * Enable Eye Dome Lighting (EDL) post-processing
+   * NOTE: These effects are now DISABLED by default to avoid interfering
+   * with other layers in the unified viewer. Only enable when tileset is loaded.
    */
   const enableEDL = useCallback((viewer: any) => {
     // @ts-ignore
@@ -90,49 +92,31 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
     if (!Cesium || !viewer.scene.postProcessStages) return;
 
     try {
-      // Check if EDL is available (Cesium 1.87+)
-      if (!Cesium.PostProcessStageLibrary?.createEdgeDetectionStage) {
-        console.warn('[LidarLayer] EDL not available in this Cesium version');
-        return;
-      }
+      // DISABLED: Post-processing effects interfere with other entities
+      // in the unified viewer (parcels, buildings, etc.)
+      // These effects modify the entire scene, not just LiDAR tiles.
+      //
+      // If depth enhancement is needed specifically for LiDAR, consider:
+      // 1. Using tileset.style with pointSize based on distance
+      // 2. Custom shaders per-tileset (not global post-processing)
+      // 3. Only enabling when explicitly requested by user
 
-      // Create ambient occlusion for depth perception (alternative to EDL)
-      // Note: True EDL requires custom shaders or CesiumJS Pro
-      // Using ambient occlusion as a fallback for depth enhancement
-      const ambientOcclusion = viewer.scene.postProcessStages.ambientOcclusion;
-      if (ambientOcclusion) {
-        ambientOcclusion.enabled = true;
-        ambientOcclusion.uniforms.intensity = 4.0;
-        ambientOcclusion.uniforms.bias = 0.1;
-        ambientOcclusion.uniforms.lengthCap = 0.03;
-        postProcessStagesRef.current = ambientOcclusion;
-        console.log('[LidarLayer] Enabled ambient occlusion for depth enhancement');
-      }
+      console.log('[LidarLayer] Post-processing disabled to avoid viewer conflicts');
 
-      // Additionally enable FXAA for smoother point rendering
-      const fxaa = viewer.scene.postProcessStages.fxaa;
-      if (fxaa) {
-        fxaa.enabled = true;
-      }
+      // Store reference for potential future use
+      postProcessStagesRef.current = viewer.scene.postProcessStages.ambientOcclusion;
     } catch (error) {
-      console.warn('[LidarLayer] Could not enable post-processing:', error);
+      console.warn('[LidarLayer] Could not configure post-processing:', error);
     }
   }, []);
 
   /**
    * Disable post-processing effects
+   * NOTE: No-op since we no longer enable global effects
    */
-  const disablePostProcessing = useCallback((viewer: any) => {
-    if (!viewer || viewer.isDestroyed()) return;
-
-    try {
-      const ambientOcclusion = viewer.scene.postProcessStages?.ambientOcclusion;
-      if (ambientOcclusion) {
-        ambientOcclusion.enabled = false;
-      }
-    } catch (error) {
-      console.warn('[LidarLayer] Error disabling post-processing:', error);
-    }
+  const disablePostProcessing = useCallback((_viewer: any) => {
+    // No-op: Post-processing is no longer enabled by this module
+    // to avoid conflicts with other viewer layers
   }, []);
 
   /**
