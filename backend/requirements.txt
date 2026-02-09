@@ -33,6 +33,8 @@ ngsildclient==0.5.2
 
 # 3D Tiles conversion (not available on conda-forge)
 py3dtiles[las,ply]==7.0.0
+# LAZ decompression backend for laspy (Rust-based, fast)
+lazrs>=0.8.0
 
 # Utilities
 python-dotenv==1.0.0
