@@ -46,22 +46,46 @@ npm run dev  # Starts on port 5004
 ## Deployment
 
 ### Build Docker Images
-```bash
-# Backend
-docker build -f backend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest .
 
-# Frontend
+Build context matters: the backend Dockerfile expects files from `backend/` (e.g. `environment.yml`), so use `./backend` as context. The frontend uses the repo root.
+
+```bash
+# Backend (context = ./backend)
+docker build -f backend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest ./backend
+
+# Frontend (context = repo root)
 docker build -f frontend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest .
 ```
 
 ### Kubernetes Deployment
 ```bash
-# Apply deployments
-kubectl apply -f k8s/backend-deployment.yaml
-kubectl apply -f k8s/frontend-deployment.yaml
+# Apply deployments (use -n nekazari if not default)
+kubectl apply -f k8s/backend-deployment.yaml -n nekazari
+kubectl apply -f k8s/frontend-deployment.yaml -n nekazari
 
 # Register module in platform database
 psql -h <db-host> -U <user> -d nekazari -f k8s/registration.sql
+```
+
+### Deploy to production (GitOps, manual)
+
+From your machine: commit and push. On the server:
+
+```bash
+ssh g@<production-server>
+cd ~/nkz-module-lidar
+git pull origin main
+
+# Build and push images (requires Docker login to GHCR)
+docker build -f backend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest ./backend
+docker push ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest
+
+docker build -f frontend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest .
+docker push ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest
+
+# Rollout so pods use the new images (imagePullPolicy: Always)
+sudo kubectl rollout restart deployment/lidar-frontend deployment/lidar-api deployment/lidar-worker -n nekazari
+sudo kubectl rollout status deployment/lidar-frontend deployment/lidar-api deployment/lidar-worker -n nekazari
 ```
 
 ## Module Integration

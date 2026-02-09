@@ -104,24 +104,40 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
 
     if (!activeTilesetUrl) return;
 
+    // Auth and tenant so tile requests (tileset.json + tile content) succeed
+    const authCtx = typeof window !== 'undefined' ? (window as any).__nekazariAuthContext ?? (window as any).__nekazariAuth : undefined;
+    const token =
+      (typeof window !== 'undefined' && (window as any).keycloak?.token) ||
+      (authCtx?.getToken?.()) ||
+      null;
+    const tenantId = authCtx?.tenantId ?? null;
+    const requestHeaders: Record<string, string> = {};
+    if (token) requestHeaders.Authorization = `Bearer ${token}`;
+    if (tenantId) requestHeaders['X-Tenant-ID'] = tenantId;
+
     const loadTileset = async () => {
       try {
         let tileset: CesiumTilesetType;
+        const options = {
+          maximumScreenSpaceError: 8,
+          maximumMemoryUsage: 1024,
+          dynamicScreenSpaceError: true,
+          dynamicScreenSpaceErrorDensity: 0.00278,
+          dynamicScreenSpaceErrorFactor: 4.0,
+        };
 
-        // Use fromUrl for newer Cesium versions, fallback to constructor
-        if (Cesium.Cesium3DTileset.fromUrl) {
-          tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, {
-            maximumScreenSpaceError: 8,
-            maximumMemoryUsage: 1024,
-            dynamicScreenSpaceError: true,
-            dynamicScreenSpaceErrorDensity: 0.00278,
-            dynamicScreenSpaceErrorFactor: 4.0,
-          });
+        // Use Resource with headers so Cesium sends Authorization on tileset + tile requests
+        if (Object.keys(requestHeaders).length > 0 && Cesium.Resource) {
+          const resource = new Cesium.Resource({ url: activeTilesetUrl, headers: requestHeaders });
+          if (Cesium.Cesium3DTileset.fromUrl) {
+            tileset = await Cesium.Cesium3DTileset.fromUrl(resource, options);
+          } else {
+            tileset = new Cesium.Cesium3DTileset({ resource, ...options });
+          }
+        } else if (Cesium.Cesium3DTileset.fromUrl) {
+          tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, options);
         } else {
-          tileset = new Cesium.Cesium3DTileset({
-            url: activeTilesetUrl,
-            maximumScreenSpaceError: 8,
-          });
+          tileset = new Cesium.Cesium3DTileset({ url: activeTilesetUrl, ...options });
         }
 
         // Add to scene
