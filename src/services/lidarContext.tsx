@@ -8,10 +8,19 @@
  * - Color mode for visualization
  */
 
-import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect, useRef } from 'react';
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
 import type { GeoJSONGeometry } from '../types';
+
+// ============================================================================
+// Cross-Provider Sync Events
+// ============================================================================
+// When multiple LidarProvider instances exist (one per slot: context-panel,
+// map-layer, layer-toggle), they each have independent React state.
+// These custom events keep critical state synchronized across instances.
+const SYNC_EVENT = 'lidar:sync';
+const COLORMODE_EVENT = 'lidar:colormode';
 
 /**
  * Convert GeoJSON geometry to WKT string
@@ -94,6 +103,9 @@ const LidarContext = createContext<LidarContextType | undefined>(undefined);
 // ============================================================================
 
 export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Unique ID for this provider instance (to ignore own sync events)
+  const providerIdRef = useRef(Math.random().toString(36).slice(2));
+
   // Get entity selection from host via SDK
   const viewer = useViewer();
 
@@ -205,6 +217,47 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [viewer.selectedEntityId, selectedLayerId]);
 
+  // Notify other LidarProvider instances to re-fetch layers
+  const notifyOtherProviders = useCallback(() => {
+    window.dispatchEvent(new CustomEvent(SYNC_EVENT, {
+      detail: { providerId: providerIdRef.current }
+    }));
+  }, []);
+
+  // Listen for sync events from other provider instances
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.providerId === providerIdRef.current) return;
+      const entityId = viewer.selectedEntityId;
+      if (entityId) {
+        lidarApi.getLayers(entityId).then(fetchedLayers => {
+          setLayers(fetchedLayers);
+          if (fetchedLayers.length > 0) {
+            setSelectedLayerId(fetchedLayers[0].id);
+            setActiveTilesetUrl(fetchedLayers[0].tileset_url);
+          } else {
+            setSelectedLayerId(null);
+            setActiveTilesetUrl(null);
+          }
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener(SYNC_EVENT, handler);
+    return () => window.removeEventListener(SYNC_EVENT, handler);
+  }, [viewer.selectedEntityId]);
+
+  // Listen for color mode changes from other provider instances
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.providerId === providerIdRef.current) return;
+      setColorMode(detail.mode);
+    };
+    window.addEventListener(COLORMODE_EVENT, handler);
+    return () => window.removeEventListener(COLORMODE_EVENT, handler);
+  }, []);
+
   // Delete a layer
   const deleteLayerFn = useCallback(async (layerId: string) => {
     await lidarApi.deleteLayer(layerId);
@@ -214,7 +267,8 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setActiveTilesetUrl(null);
     }
     await refreshLayers();
-  }, [selectedLayerId, refreshLayers]);
+    notifyOtherProviders();
+  }, [selectedLayerId, refreshLayers, notifyOtherProviders]);
 
   // Refresh layers when entity changes
   useEffect(() => {
@@ -270,6 +324,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (finalStatus.tileset_url) {
         setActiveTilesetUrl(finalStatus.tileset_url);
         await refreshLayers();
+        notifyOtherProviders();
       }
     } catch (error) {
       console.error('[LidarContext] Processing failed:', error);
@@ -277,7 +332,15 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     } finally {
       setIsProcessing(false);
     }
-  }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers]);
+  }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers, notifyOtherProviders]);
+
+  // Color mode setter with cross-provider sync
+  const setColorModeWithSync = useCallback((mode: ColorMode) => {
+    setColorMode(mode);
+    window.dispatchEvent(new CustomEvent(COLORMODE_EVENT, {
+      detail: { providerId: providerIdRef.current, mode }
+    }));
+  }, []);
 
   // Reset all state (except entity selection which comes from host)
   const resetContext = useCallback(() => {
@@ -305,7 +368,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setSelectedLayerId,
         setActiveTilesetUrl,
         colorMode,
-        setColorMode,
+        setColorMode: setColorModeWithSync,
         showTrees,
         setShowTrees,
         isProcessing,
