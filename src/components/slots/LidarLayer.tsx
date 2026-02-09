@@ -1,6 +1,6 @@
 /**
  * LIDAR Layer - Cesium 3D Tiles Integration
- * 
+ *
  * Features:
  * - Loads 3D Tiles point clouds from tileset URL
  * - Eye Dome Lighting (EDL) for depth perception
@@ -11,12 +11,18 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Cesium types are loaded globally by the host at runtime.
+// We use `any` here because Cesium's type definitions are not bundled with this module.
+type CesiumViewerType = any;
+type CesiumTilesetType = any;
+
 interface LidarLayerProps {
-  viewer?: any; // Cesium.Viewer - Injected by CesiumMap slot renderer
+  viewer?: CesiumViewerType;
 }
 
 // Color ramps for different visualization modes
-const COLOR_RAMPS = {
+const COLOR_RAMPS: Record<string, string> = {
   // Height: Blue (low) -> Green -> Yellow -> Red (high)
   height: `
     var height = \${POSITION}[2];
@@ -58,15 +64,14 @@ const COLOR_RAMPS = {
 };
 
 export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
-  const { activeTilesetUrl, colorMode, showTrees } = useLidarContext();
-  const tilesetRef = useRef<any>(null);
-  const postProcessStagesRef = useRef<any>(null);
+  const { activeTilesetUrl, colorMode } = useLidarContext();
+  const tilesetRef = useRef<CesiumTilesetType | null>(null);
 
   /**
    * Create style expression for current color mode
    */
   const createStyle = useCallback((mode: ColorMode) => {
-    // @ts-ignore
+    // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
     if (!Cesium) return null;
 
@@ -82,58 +87,14 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
   }, []);
 
   /**
-   * Enable Eye Dome Lighting (EDL) post-processing
-   * NOTE: These effects are now DISABLED by default to avoid interfering
-   * with other layers in the unified viewer. Only enable when tileset is loaded.
-   */
-  const enableEDL = useCallback((viewer: any) => {
-    // @ts-ignore
-    const Cesium = window.Cesium;
-    if (!Cesium || !viewer.scene.postProcessStages) return;
-
-    try {
-      // DISABLED: Post-processing effects interfere with other entities
-      // in the unified viewer (parcels, buildings, etc.)
-      // These effects modify the entire scene, not just LiDAR tiles.
-      //
-      // If depth enhancement is needed specifically for LiDAR, consider:
-      // 1. Using tileset.style with pointSize based on distance
-      // 2. Custom shaders per-tileset (not global post-processing)
-      // 3. Only enabling when explicitly requested by user
-
-      console.log('[LidarLayer] Post-processing disabled to avoid viewer conflicts');
-
-      // Store reference for potential future use
-      postProcessStagesRef.current = viewer.scene.postProcessStages.ambientOcclusion;
-    } catch (error) {
-      console.warn('[LidarLayer] Could not configure post-processing:', error);
-    }
-  }, []);
-
-  /**
-   * Disable post-processing effects
-   * NOTE: No-op since we no longer enable global effects
-   */
-  const disablePostProcessing = useCallback((_viewer: any) => {
-    // No-op: Post-processing is no longer enabled by this module
-    // to avoid conflicts with other viewer layers
-  }, []);
-
-  /**
    * Load 3D Tiles tileset
    */
   useEffect(() => {
-    if (!viewer) {
-      console.warn('[LidarLayer] No viewer provided');
-      return;
-    }
+    if (!viewer) return;
 
-    // @ts-ignore
+    // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
-    if (!Cesium) {
-      console.warn('[LidarLayer] Cesium not available');
-      return;
-    }
+    if (!Cesium) return;
 
     // Cleanup previous tileset
     if (tilesetRef.current) {
@@ -141,24 +102,17 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
       tilesetRef.current = null;
     }
 
-    // If no URL, disable effects and exit
-    if (!activeTilesetUrl) {
-      disablePostProcessing(viewer);
-      return;
-    }
+    if (!activeTilesetUrl) return;
 
-    console.log('[LidarLayer] Loading 3D Tiles:', activeTilesetUrl);
-
-    // Load the tileset
     const loadTileset = async () => {
       try {
-        let tileset: any;
+        let tileset: CesiumTilesetType;
 
         // Use fromUrl for newer Cesium versions, fallback to constructor
         if (Cesium.Cesium3DTileset.fromUrl) {
           tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, {
-            maximumScreenSpaceError: 8, // Higher quality for point clouds
-            maximumMemoryUsage: 1024, // MB
+            maximumScreenSpaceError: 8,
+            maximumMemoryUsage: 1024,
             dynamicScreenSpaceError: true,
             dynamicScreenSpaceErrorDensity: 0.00278,
             dynamicScreenSpaceErrorFactor: 4.0,
@@ -180,16 +134,12 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
           tileset.style = style;
         }
 
-        // Enable depth enhancement
-        enableEDL(viewer);
-
         // Wait for tileset to load then fly to it
         if (tileset.readyPromise) {
           await tileset.readyPromise;
         }
 
         if (!viewer.isDestroyed()) {
-          console.log('[LidarLayer] 3D Tiles loaded successfully');
           viewer.flyTo(tileset, {
             duration: 1.5,
             offset: new Cesium.HeadingPitchRange(
@@ -199,7 +149,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
             ),
           });
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error('[LidarLayer] Error loading 3D Tiles:', error);
       }
     };
@@ -211,10 +161,9 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
       if (tilesetRef.current && viewer && !viewer.isDestroyed()) {
         viewer.scene.primitives.remove(tilesetRef.current);
         tilesetRef.current = null;
-        disablePostProcessing(viewer);
       }
     };
-  }, [viewer, activeTilesetUrl, createStyle, enableEDL, disablePostProcessing]);
+  }, [viewer, activeTilesetUrl, createStyle, colorMode]);
 
   /**
    * Update style when color mode changes
@@ -224,7 +173,6 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
       const style = createStyle(colorMode);
       if (style) {
         tilesetRef.current.style = style;
-        console.log('[LidarLayer] Style updated to:', colorMode);
       }
     }
   }, [colorMode, createStyle]);
@@ -234,4 +182,3 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
 };
 
 export default LidarLayer;
-

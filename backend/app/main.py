@@ -3,6 +3,7 @@ FastAPI main application for LIDAR module.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,9 +60,13 @@ app = FastAPI(
 )
 
 # CORS middleware
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://nekazari.artotxiki.com,https://nkz.artotxiki.com"
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[o.strip() for o in _cors_origins.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

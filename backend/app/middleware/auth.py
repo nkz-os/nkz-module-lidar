@@ -34,23 +34,15 @@ def get_jwks_client() -> PyJWKClient:
 async def verify_token(token: str) -> dict:
     """Verify JWT token and return payload."""
     try:
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        token_issuer = unverified.get('iss')
-        logger.info(f"Token issuer: {token_issuer}, Expected issuer: {JWT_ISSUER}")
-        
         jwks_client = get_jwks_client()
         signing_key = jwks_client.get_signing_key_from_jwt(token)
-        
-        verify_issuer = JWT_ISSUER if token_issuer == JWT_ISSUER else None
-        if verify_issuer is None:
-            logger.warning(f"Issuer mismatch: token has '{token_issuer}', expected '{JWT_ISSUER}'. Verifying without issuer check.")
-        
+
         payload = jwt.decode(
             token,
             signing_key.key,
             algorithms=[JWT_ALGORITHM],
-            issuer=verify_issuer,
-            options={"verify_exp": True, "verify_iss": verify_issuer is not None}
+            issuer=JWT_ISSUER,
+            options={"verify_exp": True, "verify_iss": True}
         )
         
         return payload

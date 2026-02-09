@@ -1,6 +1,6 @@
 /**
  * TreeInfo - Tree Information Popup/Panel Component
- * 
+ *
  * Displays detailed information about a detected tree entity.
  * Used in the context panel when a tree marker is clicked.
  */
@@ -8,18 +8,8 @@
 import React from 'react';
 import { TreeDeciduous, Ruler, Circle, Leaf, MapPin } from 'lucide-react';
 import { useUIKit } from '../../hooks/useUIKit';
-
-interface TreeData {
-    id: string;
-    height: number;
-    crownDiameter: number;
-    crownArea: number;
-    ndviMean?: number;
-    location: {
-        type: string;
-        coordinates: [number, number];
-    };
-}
+import { useTranslation } from '../../sdk';
+import type { TreeData } from '../../types';
 
 interface TreeInfoProps {
     tree: TreeData | null;
@@ -27,7 +17,8 @@ interface TreeInfoProps {
 }
 
 const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
-    const { Card, Button } = useUIKit();
+    const { Card } = useUIKit();
+    const { t } = useTranslation('lidar');
 
     if (!tree) {
         return null;
@@ -35,11 +26,11 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
 
     // Health status based on NDVI
     const getHealthStatus = (ndvi?: number) => {
-        if (ndvi === undefined) return { label: 'Desconocido', color: 'text-slate-500', bg: 'bg-slate-100' };
-        if (ndvi >= 0.6) return { label: 'Excelente', color: 'text-green-700', bg: 'bg-green-100' };
-        if (ndvi >= 0.4) return { label: 'Bueno', color: 'text-emerald-700', bg: 'bg-emerald-100' };
-        if (ndvi >= 0.2) return { label: 'Regular', color: 'text-yellow-700', bg: 'bg-yellow-100' };
-        return { label: 'Bajo', color: 'text-red-700', bg: 'bg-red-100' };
+        if (ndvi === undefined) return { label: t('tree.health.unknown'), color: 'text-slate-500', bg: 'bg-slate-100' };
+        if (ndvi >= 0.6) return { label: t('tree.health.excellent'), color: 'text-green-700', bg: 'bg-green-100' };
+        if (ndvi >= 0.4) return { label: t('tree.health.good'), color: 'text-emerald-700', bg: 'bg-emerald-100' };
+        if (ndvi >= 0.2) return { label: t('tree.health.fair'), color: 'text-yellow-700', bg: 'bg-yellow-100' };
+        return { label: t('tree.health.poor'), color: 'text-red-700', bg: 'bg-red-100' };
     };
 
     const healthStatus = getHealthStatus(tree.ndviMean);
@@ -51,14 +42,14 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <h3 className="font-semibold text-slate-800 flex items-center gap-2">
                         <TreeDeciduous className="w-5 h-5 text-green-600" />
-                        Árbol Individual
+                        {t('tree.title')}
                     </h3>
                     {onClose && (
                         <button
                             onClick={onClose}
                             className="text-slate-400 hover:text-slate-600 transition-colors"
                         >
-                            ×
+                            &times;
                         </button>
                     )}
                 </div>
@@ -72,7 +63,7 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                 <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${healthStatus.bg}`}>
                     <Leaf className={`w-4 h-4 ${healthStatus.color}`} />
                     <span className={`text-sm font-medium ${healthStatus.color}`}>
-                        Estado: {healthStatus.label}
+                        {t('tree.health.label')}: {healthStatus.label}
                     </span>
                 </div>
 
@@ -82,7 +73,7 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                     <div className="bg-slate-50 rounded-lg p-3">
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
                             <Ruler className="w-3.5 h-3.5" />
-                            <span className="text-xs font-medium">Altura</span>
+                            <span className="text-xs font-medium">{t('tree.height')}</span>
                         </div>
                         <div className="text-lg font-bold text-slate-800">
                             {tree.height.toFixed(1)} <span className="text-sm font-normal text-slate-500">m</span>
@@ -93,7 +84,7 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                     <div className="bg-slate-50 rounded-lg p-3">
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
                             <Circle className="w-3.5 h-3.5" />
-                            <span className="text-xs font-medium">Ø Copa</span>
+                            <span className="text-xs font-medium">{t('tree.crownDiameter')}</span>
                         </div>
                         <div className="text-lg font-bold text-slate-800">
                             {tree.crownDiameter.toFixed(1)} <span className="text-sm font-normal text-slate-500">m</span>
@@ -104,10 +95,10 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                     <div className="bg-slate-50 rounded-lg p-3">
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
                             <TreeDeciduous className="w-3.5 h-3.5" />
-                            <span className="text-xs font-medium">Área Copa</span>
+                            <span className="text-xs font-medium">{t('tree.crownArea')}</span>
                         </div>
                         <div className="text-lg font-bold text-slate-800">
-                            {tree.crownArea.toFixed(1)} <span className="text-sm font-normal text-slate-500">m²</span>
+                            {tree.crownArea.toFixed(1)} <span className="text-sm font-normal text-slate-500">m&sup2;</span>
                         </div>
                     </div>
 
@@ -115,10 +106,10 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                     <div className="bg-slate-50 rounded-lg p-3">
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
                             <Leaf className="w-3.5 h-3.5" />
-                            <span className="text-xs font-medium">NDVI</span>
+                            <span className="text-xs font-medium">{t('tree.ndvi')}</span>
                         </div>
                         <div className="text-lg font-bold text-slate-800">
-                            {tree.ndviMean !== undefined ? tree.ndviMean.toFixed(2) : '—'}
+                            {tree.ndviMean !== undefined ? tree.ndviMean.toFixed(2) : '\u2014'}
                         </div>
                     </div>
                 </div>
@@ -133,10 +124,10 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
 
                 {/* Estimated Biomass (calculated from height and crown) */}
                 <div className="border-t border-slate-100 pt-3">
-                    <div className="text-xs text-slate-500 mb-1">Biomasa Estimada</div>
+                    <div className="text-xs text-slate-500 mb-1">{t('tree.biomass')}</div>
                     <div className="text-sm font-medium text-slate-700">
                         ~{Math.round(tree.height * tree.crownArea * 0.5)} kg
-                        <span className="text-xs text-slate-400 ml-1">(aproximado)</span>
+                        <span className="text-xs text-slate-400 ml-1">{t('tree.biomassApprox')}</span>
                     </div>
                 </div>
             </div>

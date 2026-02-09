@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     
     # MinIO / S3 Storage
     MINIO_ENDPOINT: str = "minio:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_ACCESS_KEY: str  # Required - no default
+    MINIO_SECRET_KEY: str  # Required - no default
     MINIO_BUCKET: str = "lidar-tilesets"
     MINIO_SECURE: bool = False
     

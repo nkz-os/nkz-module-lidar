@@ -11,11 +11,12 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
+import type { GeoJSONGeometry } from '../types';
 
 /**
  * Convert GeoJSON geometry to WKT string
  */
-function geoJsonToWkt(geojson: any): string | null {
+function geoJsonToWkt(geojson: GeoJSONGeometry): string | null {
   if (!geojson || !geojson.type) return null;
 
   const formatCoord = (coord: number[]) => `${coord[0]} ${coord[1]}`;
@@ -26,16 +27,17 @@ function geoJsonToWkt(geojson: any): string | null {
       return `POINT(${formatCoord(geojson.coordinates)})`;
     case 'LineString':
       return `LINESTRING(${formatRing(geojson.coordinates)})`;
-    case 'Polygon':
+    case 'Polygon': {
       const rings = geojson.coordinates.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ');
       return `POLYGON(${rings})`;
-    case 'MultiPolygon':
+    }
+    case 'MultiPolygon': {
       const polys = geojson.coordinates.map((poly: number[][][]) =>
         `(${poly.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ')})`
       ).join(', ');
       return `MULTIPOLYGON(${polys})`;
+    }
     default:
-      console.warn('[LidarContext] Unsupported geometry type:', geojson.type);
       return null;
   }
 }
@@ -79,6 +81,7 @@ interface LidarContextType {
   // Layers
   layers: Layer[];
   refreshLayers: () => Promise<void>;
+  deleteLayer: (layerId: string) => Promise<void>;
 
   // Reset
   resetContext: () => void;
@@ -96,7 +99,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Entity geometry (fetched when entity changes)
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
-  const [isLoadingGeometry, setIsLoadingGeometry] = useState(false);
+  const [, setIsLoadingGeometry] = useState(false);
 
   // Layer state
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
@@ -127,8 +130,6 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      console.log('[LidarContext] Entity selected:', viewer.selectedEntityId, viewer.selectedEntityType);
-
       // Reset state for new entity
       setSelectedLayerId(null);
       setActiveTilesetUrl(null);
@@ -138,7 +139,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       try {
         // Fetch entity geometry from Context Broker
-        const auth = (window as any).__nekazariAuth;
+        const auth = window.__nekazariAuth;
         const headers: HeadersInit = {
           'Accept': 'application/ld+json',
         };
@@ -155,16 +156,11 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
         if (response.ok) {
           const entity = await response.json();
-          // Extract geometry WKT from location GeoProperty
           const location = entity.location?.value;
           if (location) {
-            // Convert GeoJSON to WKT
-            const wkt = geoJsonToWkt(location);
-            console.log('[LidarContext] Got geometry:', wkt?.substring(0, 50) + '...');
+            const wkt = geoJsonToWkt(location as GeoJSONGeometry);
             setSelectedEntityGeometry(wkt);
           }
-        } else {
-          console.warn('[LidarContext] Failed to fetch entity geometry:', response.status);
         }
       } catch (error) {
         console.error('[LidarContext] Error fetching entity geometry:', error);
@@ -181,7 +177,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     viewer.selectEntity(id, id ? 'AgriParcel' : null);
   }, [viewer]);
 
-  // Refresh layers list - defined early to use in effect below
+  // Refresh layers list
   const refreshLayers = useCallback(async () => {
     if (!viewer.selectedEntityId) {
       setLayers([]);
@@ -201,6 +197,17 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       console.error('[LidarContext] Failed to refresh layers:', error);
     }
   }, [viewer.selectedEntityId, selectedLayerId]);
+
+  // Delete a layer
+  const deleteLayerFn = useCallback(async (layerId: string) => {
+    await lidarApi.deleteLayer(layerId);
+    // If deleted layer was active, clear it
+    if (selectedLayerId === layerId) {
+      setSelectedLayerId(null);
+      setActiveTilesetUrl(null);
+    }
+    await refreshLayers();
+  }, [selectedLayerId, refreshLayers]);
 
   // Refresh layers when entity changes
   useEffect(() => {
@@ -238,20 +245,16 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setProcessingJob(null);
 
     try {
-      // Start the job
       const response = await lidarApi.startProcessing({
         parcel_id: viewer.selectedEntityId,
         parcel_geometry_wkt: selectedEntityGeometry,
         config: processingConfig,
       });
 
-      console.log('[LidarContext] Processing started:', response);
-
       // Poll for completion
       const finalStatus = await lidarApi.pollJobStatus(
         response.job_id,
         (status) => {
-          console.log('[LidarContext] Job progress:', status);
           setProcessingJob(status);
         }
       );
@@ -307,6 +310,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         checkCoverage,
         layers,
         refreshLayers,
+        deleteLayer: deleteLayerFn,
         resetContext,
       }}
     >
@@ -326,4 +330,3 @@ export const useLidarContext = () => {
   }
   return context;
 };
-

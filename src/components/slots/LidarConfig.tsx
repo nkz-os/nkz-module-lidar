@@ -1,21 +1,24 @@
 /**
  * LIDAR Config - Context panel component for tree details
- * 
+ *
  * Shows when a parcel is selected and displays configuration
  * and tree information when trees are detected.
  */
 
 import React from 'react';
 import { useUIKit } from '../../hooks/useUIKit';
+import { useTranslation } from '../../sdk';
 import { useLidarContext } from '../../services/lidarContext';
 import TreeInfo from './TreeInfo';
+import type { TreeData } from '../../types';
 
 interface LidarConfigProps {
-  selectedTree?: any;  // Tree data from map click
+  selectedTree?: TreeData | null;
 }
 
 const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
   const { Card } = useUIKit();
+  const { t } = useTranslation('lidar');
   const {
     selectedEntityId,
     activeTilesetUrl,
@@ -35,13 +38,13 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
   return (
     <Card padding="md" className="bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl">
       <div className="space-y-4">
-        <h3 className="font-semibold text-slate-800">Configuración LIDAR</h3>
+        <h3 className="font-semibold text-slate-800">{t('config.title')}</h3>
 
         <div className="space-y-3">
           {/* Parcel Info */}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wider">
-              Parcela
+              {t('config.parcel')}
             </label>
             <p className="text-sm text-slate-800 mt-1 font-mono truncate">
               {selectedEntityId.split(':').pop()}
@@ -52,11 +55,11 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
           {activeTilesetUrl && (
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wider">
-                Capa activa
+                {t('config.activeLayer')}
               </label>
               <div className="flex items-center gap-2 mt-1">
                 <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                <span className="text-sm text-green-700">Nube de puntos cargada</span>
+                <span className="text-sm text-green-700">{t('config.pointCloudLoaded')}</span>
               </div>
             </div>
           )}
@@ -65,13 +68,13 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
           {activeTilesetUrl && (
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wider">
-                Modo de visualización
+                {t('config.viewMode')}
               </label>
               <p className="text-sm text-slate-800 mt-1 capitalize">
-                {colorMode === 'ndvi' ? 'NDVI (Vigor)' :
-                  colorMode === 'height' ? 'Altura' :
-                    colorMode === 'rgb' ? 'Color Real' :
-                      colorMode === 'classification' ? 'Clasificación' : colorMode}
+                {colorMode === 'ndvi' ? t('config.viewMode.ndvi') :
+                  colorMode === 'height' ? t('config.viewMode.height') :
+                    colorMode === 'rgb' ? t('config.viewMode.rgb') :
+                      colorMode === 'classification' ? t('config.viewMode.classification') : colorMode}
               </p>
             </div>
           )}
@@ -80,14 +83,14 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
           {processingJob && processingJob.status !== 'completed' && (
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wider">
-                Estado del procesamiento
+                {t('config.processingStatus')}
               </label>
               <p className="text-sm text-slate-800 mt-1">
                 {processingJob.status_message || processingJob.status}
               </p>
               {processingJob.tree_count !== undefined && processingJob.tree_count > 0 && (
                 <p className="text-xs text-green-600 mt-1">
-                  🌳 {processingJob.tree_count} árboles detectados
+                  {t('config.treesDetected', { count: processingJob.tree_count })}
                 </p>
               )}
             </div>
@@ -97,20 +100,20 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
           {processingJob?.status === 'completed' && processingJob.tree_count !== undefined && (
             <div className="border-t border-slate-100 pt-3">
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wider">
-                Resultados
+                {t('config.results')}
               </label>
               <div className="mt-2 space-y-1">
                 <p className="text-sm text-slate-700">
-                  🌳 <strong>{processingJob.tree_count}</strong> árboles detectados
+                  <strong>{t('config.treesDetected', { count: processingJob.tree_count })}</strong>
                 </p>
                 {processingJob.point_count && (
                   <p className="text-sm text-slate-700">
-                    📍 <strong>{(processingJob.point_count / 1000000).toFixed(2)}M</strong> puntos
+                    <strong>{t('config.points', { count: (processingJob.point_count / 1000000).toFixed(2) })}</strong>
                   </p>
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                Haz clic en un árbol en el mapa para ver detalles
+                {t('config.clickTree')}
               </p>
             </div>
           )}
@@ -122,5 +125,3 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
 
 export { LidarConfig };
 export default LidarConfig;
-
-

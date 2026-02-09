@@ -86,8 +86,7 @@ class LidarApiClient {
         this.baseUrl = '/api/lidar';
         this.getToken = () => {
             // Try to get token from global context (injected by host)
-            const auth = (window as any).__nekazariAuth;
-            return auth?.token || null;
+            return window.__nekazariAuth?.token ?? null;
         };
     }
 
@@ -96,10 +95,15 @@ class LidarApiClient {
         options: RequestInit = {}
     ): Promise<T> {
         const token = this.getToken();
-        const headers: HeadersInit = {
+        const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            ...(options.headers || {}),
         };
+
+        // Merge provided headers
+        if (options.headers) {
+            const extra = options.headers as Record<string, string>;
+            Object.assign(headers, extra);
+        }
 
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;

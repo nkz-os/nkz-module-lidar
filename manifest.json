@@ -1,24 +1,34 @@
 {
   "id": "lidar",
   "name": "lidar",
-  "display_name": "LIDAR Point Cloud Viewer",
+  "display_name": "LiDAR Point Cloud Viewer",
   "version": "1.0.0",
-  "description": "Visualize LIDAR point cloud data from IDENA in the unified CesiumJS viewer. Download and convert LAZ files to 3D Tiles for interactive visualization.",
-  "short_description": "LIDAR point cloud visualization for parcel analysis",
+  "description": "Visualize LiDAR point cloud data in the unified CesiumJS viewer. Download from national LiDAR providers (PNOA/CNIG) or upload custom drone flights. Includes 3D Tiles conversion, dynamic colorization, and individual tree detection.",
+  "short_description": "LiDAR point cloud visualization and tree analysis",
   "author": {
     "name": "Nekazari Team",
     "email": "nekazari@artotxiki.com",
     "organization": "Nekazari"
+  },
+  "developer": {
+    "name": "Nekazari",
+    "website": "https://nekazari.artotxiki.com",
+    "support_email": "nekazari@artotxiki.com"
   },
   "category": "analytics",
   "module_type": "ADDON_PAID",
   "required_plan_type": "premium",
   "pricing_tier": "PAID",
   "route_path": "/lidar",
-  "label": "LIDAR",
+  "label": "LiDAR",
   "icon": "layers",
   "icon_url": "assets/icon.png",
-  "required_roles": ["Farmer", "TenantAdmin", "PlatformAdmin"],
+  "required_roles": ["Farmer", "TechnicalConsultant", "TenantAdmin", "PlatformAdmin"],
+  "navigation": {
+    "enabled": true,
+    "priority": 60,
+    "section": "analytics"
+  },
   "dependencies": {
     "sdk_version": "^1.0.0",
     "react_version": "^18.3.1",
@@ -30,7 +40,9 @@
     ],
     "storage_access": true,
     "external_requests": [
-      "https://idena.navarra.es"
+      "https://centrodedescargas.cnig.es",
+      "https://www.ign.es",
+      "https://filescartografia.navarra.es"
     ]
   },
   "build_config": {
@@ -39,16 +51,22 @@
     "scope": "lidar_module",
     "exposed_module": "./App"
   },
+  "nkz_validated": {
+    "security_review": true,
+    "i18n_complete": true,
+    "css_isolated": true
+  },
   "metadata": {
     "icon": "📊",
     "color": "#6366F1",
     "features": [
-      "LIDAR point cloud visualization",
-      "IDENA LAZ file download",
-      "3D Tiles conversion",
-      "Interactive point cloud analysis",
-      "Parcel-based LIDAR data",
-      "CesiumJS integration"
+      "LiDAR point cloud visualization",
+      "PNOA/CNIG national LiDAR data download",
+      "Custom drone LAZ/LAS file upload",
+      "3D Tiles conversion for CesiumJS",
+      "Dynamic colorization (height, NDVI, RGB, classification)",
+      "Individual tree detection and analysis",
+      "Crown diameter and biomass estimation"
     ],
     "screenshots": [],
     "slots": {
