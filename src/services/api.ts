@@ -121,6 +121,13 @@ class LidarApiClient {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
+        // Add tenant ID header
+        const authCtx = window.__nekazariAuthContext ?? window.__nekazariAuth;
+        const tenantId = authCtx?.tenantId;
+        if (tenantId) {
+            headers['X-Tenant-ID'] = tenantId;
+        }
+
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             ...options,
             headers,
