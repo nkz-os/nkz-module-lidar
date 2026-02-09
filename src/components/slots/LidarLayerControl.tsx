@@ -210,9 +210,9 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   return (
-    <div className="lidar-card shadow-sm pointer-events-auto lidar-slide-in overflow-hidden">
-      {/* Header with gradient accent */}
-      <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-cyan-50">
+    <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-violet-50/60 to-cyan-50/60">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500">
@@ -233,7 +233,7 @@ const LidarLayerControl: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-5 space-y-5">
+      <div className="p-4 space-y-4">
         {/* Settings Panel */}
         {showSettings && (
           <div className="p-4 bg-slate-50 rounded-xl space-y-4 border border-slate-200 lidar-slide-in">

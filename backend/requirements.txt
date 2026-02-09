@@ -32,7 +32,7 @@ requests==2.31.0
 ngsildclient==0.5.2
 
 # 3D Tiles conversion (not available on conda-forge)
-py3dtiles==7.0.0
+py3dtiles[las,ply]==7.0.0
 
 # Utilities
 python-dotenv==1.0.0

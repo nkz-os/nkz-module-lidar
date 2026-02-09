@@ -507,6 +507,8 @@ class LidarPipeline:
         logger.info(f"Running: {' '.join(cmd)}")
         env = os.environ.copy()
         env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
+        env["PROJ_DATA"] = env.get("PROJ_DATA", "/opt/conda/share/proj")
+        env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
         
         if result.returncode != 0:
