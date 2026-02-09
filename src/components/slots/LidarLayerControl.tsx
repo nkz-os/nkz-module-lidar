@@ -210,7 +210,7 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 overflow-hidden">
+    <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 overflow-hidden mb-3">
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-violet-50/60 to-cyan-50/60">
         <div className="flex items-center justify-between">

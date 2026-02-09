@@ -16,6 +16,7 @@ import os
 import tempfile
 import shutil
 import json
+import struct
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -23,12 +24,14 @@ from datetime import datetime
 import uuid
 
 import numpy as np
+import laspy
 import pdal
 import rasterio
 from rasterio.warp import transform_bounds
 from rasterio.features import shapes
 from shapely.geometry import shape, mapping
 from shapely.ops import transform as shapely_transform
+from shapely.wkt import loads as wkt_loads
 import pyproj
 from scipy import ndimage
 from skimage.feature import peak_local_max
@@ -200,39 +203,48 @@ class LidarPipeline:
         
         # Step 2: Build PDAL pipeline for crop + denoise
         self.cropped_laz = os.path.join(self.work_dir, "cropped.laz")
-        
-        pipeline_json = {
-            "pipeline": [
-                {
-                    "type": "readers.las",
-                    "filename": self.input_laz
-                },
-                {
-                    "type": "filters.crop",
-                    "polygon": geometry_wkt
-                },
-                {
-                    "type": "filters.outlier",
-                    "method": "statistical",
-                    "mean_k": 12,
-                    "multiplier": 2.0
-                },
-                {
-                    "type": "filters.elm"  # Extended Local Minimum (ground enhancement)
-                },
-                {
-                    "type": "writers.las",
-                    "filename": self.cropped_laz,
-                    "compression": "laszip"
-                }
-            ]
-        }
-        
+
+        stages = [
+            {"type": "readers.las", "filename": self.input_laz}
+        ]
+
+        # Crop to parcel geometry (if provided)
+        if geometry_wkt and geometry_wkt.strip():
+            crop_wkt = self._reproject_crop_polygon(geometry_wkt)
+            stages.append({
+                "type": "filters.crop",
+                "polygon": crop_wkt
+            })
+
+        stages.extend([
+            {
+                "type": "filters.outlier",
+                "method": "statistical",
+                "mean_k": 12,
+                "multiplier": 2.0
+            },
+            {
+                "type": "filters.elm"  # Extended Local Minimum (ground enhancement)
+            },
+            {
+                "type": "writers.las",
+                "filename": self.cropped_laz,
+                "compression": "laszip"
+            }
+        ])
+
         logger.info("Running PDAL crop + denoise pipeline")
-        pipeline = pdal.Pipeline(json.dumps(pipeline_json))
-        pipeline.execute()
-        
-        logger.info(f"Phase A complete. Output: {self.cropped_laz}")
+        pipeline = pdal.Pipeline(json.dumps({"pipeline": stages}))
+        count = pipeline.execute()
+
+        if count == 0:
+            raise ValueError(
+                "No points remain after cropping to parcel boundary. "
+                "This usually means a CRS mismatch between the LAZ file and the parcel geometry, "
+                "or the parcel does not overlap with the downloaded tile."
+            )
+
+        logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
     
     def phase_b_spectral_fusion(self, ndvi_raster_url: str):
         """
@@ -493,7 +505,20 @@ class LidarPipeline:
         
         source_laz = self.colored_laz or self.cropped_laz
         self.output_tiles_dir = os.path.join(self.work_dir, "tiles")
-        
+
+        # Verify the source file has points before conversion
+        try:
+            with laspy.open(source_laz) as f:
+                point_count = f.header.point_count
+            if point_count == 0:
+                raise ValueError(
+                    "Cannot convert to 3D Tiles: point cloud has 0 points. "
+                    "The crop phase may have produced empty output."
+                )
+            logger.info(f"Converting {point_count} points to 3D Tiles")
+        except (laspy.LaspyError, OSError) as e:
+            raise ValueError(f"Cannot read source LAZ file for tiling: {e}")
+
         # Use py3dtiles command line (more reliable than Python API for large files)
         # Resolve full path - subprocess may not inherit conda PATH
         py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
@@ -676,6 +701,65 @@ class LidarPipeline:
                 logger.info(f"Cleaned up work directory: {self.work_dir}")
         except Exception as e:
             logger.warning(f"Failed to cleanup work directory: {e}")
+
+    def _get_laz_crs(self) -> Optional[pyproj.CRS]:
+        """Read CRS from the input LAZ file header (lightweight, header-only read)."""
+        try:
+            with laspy.open(self.input_laz) as reader:
+                crs_vlrs = [v for v in reader.header.vlrs
+                            if v.user_id == "LASF_Projection"]
+
+                # Try OGC WKT (record_id 2112)
+                for vlr in crs_vlrs:
+                    if vlr.record_id == 2112:
+                        wkt_str = vlr.record_data.decode('utf-8', errors='ignore').rstrip('\x00').strip()
+                        if wkt_str:
+                            return pyproj.CRS.from_wkt(wkt_str)
+
+                # Try GeoTIFF GeoKeyDirectoryTag (record_id 34735) for EPSG code
+                for vlr in crs_vlrs:
+                    if vlr.record_id == 34735 and len(vlr.record_data) >= 16:
+                        n_keys = struct.unpack('<H', vlr.record_data[6:8])[0]
+                        for i in range(n_keys):
+                            off = 8 + i * 8
+                            if off + 8 > len(vlr.record_data):
+                                break
+                            key_id, loc, _, val = struct.unpack('<4H', vlr.record_data[off:off+8])
+                            # ProjectedCSTypeGeoKey=3072, GeographicTypeGeoKey=2048
+                            if key_id in (3072, 2048) and loc == 0 and val > 0:
+                                return pyproj.CRS.from_epsg(val)
+        except Exception as e:
+            logger.warning(f"Could not read CRS from LAZ header: {e}")
+
+        return None
+
+    def _reproject_crop_polygon(self, geometry_wkt: str) -> str:
+        """Reproject crop polygon from WGS84 to match the LAZ file's CRS if needed."""
+        laz_crs = self._get_laz_crs()
+        if not laz_crs:
+            logger.warning("Could not determine LAZ CRS, using crop polygon as-is (WGS84)")
+            return geometry_wkt
+
+        parcel_crs = pyproj.CRS("EPSG:4326")
+
+        if laz_crs.equals(parcel_crs):
+            logger.info("LAZ file is in WGS84, no reprojection needed")
+            return geometry_wkt
+
+        try:
+            laz_epsg = laz_crs.to_epsg() or laz_crs.name
+            logger.info(f"Reprojecting crop polygon from EPSG:4326 to {laz_epsg}")
+
+            geom = wkt_loads(geometry_wkt)
+            transformer = pyproj.Transformer.from_crs(
+                parcel_crs, laz_crs, always_xy=True
+            )
+            reprojected = shapely_transform(transformer.transform, geom)
+
+            return reprojected.wkt
+        except Exception as e:
+            logger.warning(f"CRS reprojection failed, using polygon as-is: {e}")
+            return geometry_wkt
 
 
 def process_lidar_job(job_id: str):
