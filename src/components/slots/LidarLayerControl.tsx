@@ -202,17 +202,7 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   if (!selectedEntityId) {
-    return (
-      <div className="lidar-card p-6 lidar-slide-in">
-        <div className="flex flex-col items-center justify-center gap-3 py-4 text-slate-500">
-          <div className="p-3 rounded-full bg-slate-100">
-            <Layers className="w-6 h-6 text-slate-400" />
-          </div>
-          <p className="text-sm font-medium">{t('selectParcel')}</p>
-          <p className="text-xs text-slate-400">{t('toActivateLidar')}</p>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   // =========================================================================
@@ -220,7 +210,7 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   return (
-    <div className="lidar-card w-80 shadow-lg pointer-events-auto lidar-slide-in overflow-hidden">
+    <div className="lidar-card shadow-sm pointer-events-auto lidar-slide-in overflow-hidden">
       {/* Header with gradient accent */}
       <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-violet-50 to-cyan-50">
         <div className="flex items-center justify-between">

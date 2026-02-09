@@ -16,6 +16,7 @@ export default defineConfig({
         // viewerSlots for unified viewer integration - MUST be named './viewerSlots' for host compatibility
         './viewerSlots': './src/slots/index.tsx',
         // Individual components (for direct import)
+        './LidarLayerToggle': './src/components/slots/LidarLayerToggle.tsx',
         './LidarLayerControl': './src/components/slots/LidarLayerControl.tsx',
         './LidarLayer': './src/components/slots/LidarLayer.tsx',
         './LidarConfig': './src/components/slots/LidarConfig.tsx',
