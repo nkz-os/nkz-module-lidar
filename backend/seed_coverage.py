@@ -11,9 +11,6 @@ Usage:
     # Seed from CNIG shapefile
     python seed_coverage.py --shapefile /path/to/pnoa_coverage.shp --source PNOA
 
-    # Seed from IDENA (Navarra) - predefined tiles
-    python seed_coverage.py --idena
-
 Environment variables required:
     DATABASE_URL - PostgreSQL connection string
 
@@ -89,10 +86,6 @@ EXAMPLE_TILES_NAVARRA = [
     },
 ]
 
-# IDENA provides a WFS service with the full tile index
-# This can be used to get all tiles programmatically
-IDENA_WFS_URL = "https://idena.navarra.es/ogc/wfs"
-IDENA_LAYER = "IDENA:LIDAR_Vuelo"
 
 
 def seed_example_tiles(db_session):
@@ -152,80 +145,108 @@ def seed_from_shapefile(db_session, shapefile_path: str, source: str = "PNOA"):
     return count
 
 
-def seed_from_idena_wfs(db_session):
-    """Seed from IDENA WFS service (Navarra full coverage)."""
-    import requests
+
+def seed_from_navarra_shapefile(db_session, shapefile_path: str, clear_existing: bool = False):
+    """
+    Seed from official Navarra/IDENA shapefile (Malla_Lidar_2024_EPSG25830.shp).
+
+    This shapefile contains 12,428 tiles with direct download URLs.
+    Fields: name, DL_LAS (download URL), Dens_Lidar, geometry (EPSG:25830)
+
+    Download from: https://filescartografia.navarra.es/5_LIDAR/Mallas/2024/
+    """
+    import fiona
+    from shapely.geometry import shape
+    from pyproj import Transformer
     from app.models import LidarCoverageIndex
 
-    logger.info("Querying IDENA WFS for LiDAR coverage...")
+    logger.info(f"Seeding from Navarra shapefile: {shapefile_path}")
 
-    # WFS GetFeature request for all LiDAR tiles
-    params = {
-        "service": "WFS",
-        "version": "2.0.0",
-        "request": "GetFeature",
-        "typeName": IDENA_LAYER,
-        "outputFormat": "application/json",
-        "srsName": "EPSG:4326"
-    }
+    if clear_existing:
+        deleted = db_session.query(LidarCoverageIndex).filter(
+            LidarCoverageIndex.source == "NAVARRA_2024"
+        ).delete()
+        db_session.commit()
+        logger.info(f"Cleared {deleted} existing NAVARRA_2024 entries")
 
-    try:
-        response = requests.get(IDENA_WFS_URL, params=params, timeout=120)
-        response.raise_for_status()
-        data = response.json()
-    except Exception as e:
-        logger.error(f"Failed to query IDENA WFS: {e}")
-        return 0
-
-    features = data.get("features", [])
-    logger.info(f"Found {len(features)} features in IDENA WFS")
+    # Transformer from EPSG:25830 (UTM 30N) to EPSG:4326 (WGS84)
+    transformer = Transformer.from_crs("EPSG:25830", "EPSG:4326", always_xy=True)
 
     count = 0
-    for feature in features:
-        props = feature.get("properties", {})
-        geom = feature.get("geometry", {})
+    skipped = 0
 
-        if not geom or geom.get("type") != "Polygon":
-            continue
+    with fiona.open(shapefile_path, 'r') as shp:
+        logger.info(f"Shapefile CRS: {shp.crs}")
+        logger.info(f"Total features: {len(shp)}")
+        logger.info(f"Fields: {list(shp.schema['properties'].keys())}")
 
-        # Extract properties (field names may vary)
-        tile_name = props.get("FICHERO") or props.get("NOMBRE") or f"IDENA_{count}"
-        laz_url = props.get("URL_DESCARGA") or props.get("URL")
+        for feature in shp:
+            props = feature['properties']
+            geom = shape(feature['geometry'])
 
-        if not laz_url:
-            continue
+            # Get tile name and download URL
+            tile_name = props.get('name', '')
+            laz_url = props.get('DL_LAS', '')
 
-        # Build WKT from GeoJSON coordinates
-        coords = geom.get("coordinates", [[]])[0]
-        wkt_coords = ", ".join([f"{c[0]} {c[1]}" for c in coords])
-        geometry_wkt = f"POLYGON(({wkt_coords}))"
+            if not laz_url:
+                skipped += 1
+                continue
 
-        # Check if exists
-        existing = db_session.query(LidarCoverageIndex).filter(
-            LidarCoverageIndex.tile_name == tile_name
-        ).first()
+            # Parse density (format: "14 p/m2" or similar)
+            density_str = props.get('Dens_Lidar', '')
+            point_density = None
+            if density_str:
+                try:
+                    point_density = float(density_str.split()[0])
+                except (ValueError, IndexError):
+                    pass
 
-        if existing:
-            continue
+            # Check if tile already exists
+            existing = db_session.query(LidarCoverageIndex).filter(
+                LidarCoverageIndex.tile_name == tile_name
+            ).first()
 
-        tile = LidarCoverageIndex(
-            tile_name=tile_name,
-            source="IDENA",
-            flight_year=props.get("ANYO"),
-            point_density=props.get("DENSIDAD"),
-            laz_url=laz_url,
-            geometry=f"SRID=4326;{geometry_wkt}",
-            extra_metadata=props
-        )
-        db_session.add(tile)
-        count += 1
+            if existing:
+                skipped += 1
+                continue
 
-        if count % 100 == 0:
-            db_session.commit()
-            logger.info(f"Processed {count} tiles...")
+            # Transform geometry to WGS84
+            transformed_coords = []
+            if geom.geom_type == 'Polygon':
+                exterior_coords = []
+                for x, y in geom.exterior.coords:
+                    lon, lat = transformer.transform(x, y)
+                    exterior_coords.append(f"{lon} {lat}")
+                wkt = f"POLYGON(({', '.join(exterior_coords)}))"
+            else:
+                logger.warning(f"Skipping non-polygon geometry: {geom.geom_type}")
+                skipped += 1
+                continue
+
+            # Create entry
+            tile = LidarCoverageIndex(
+                tile_name=tile_name,
+                source="NAVARRA_2024",
+                flight_year=2024,
+                point_density=point_density,
+                laz_url=laz_url,
+                geometry=f"SRID=4326;{wkt}",
+                extra_metadata={
+                    "original_crs": "EPSG:25830",
+                    "lidar_system": props.get('LiDAR_Sys', ''),
+                    "classification": props.get('Clasific', ''),
+                    "seed_date": datetime.utcnow().isoformat()
+                }
+            )
+            db_session.add(tile)
+            count += 1
+
+            if count % 1000 == 0:
+                db_session.commit()
+                logger.info(f"Processed {count} tiles...")
 
     db_session.commit()
-    logger.info(f"Seeded {count} tiles from IDENA WFS")
+    logger.info(f"Seeded {count} tiles from Navarra shapefile (skipped {skipped})")
     return count
 
 
@@ -252,9 +273,11 @@ def verify_coverage(db_session):
 def main():
     parser = argparse.ArgumentParser(description="Seed LiDAR coverage index")
     parser.add_argument("--example", action="store_true", help="Seed example tiles (Navarra)")
-    parser.add_argument("--idena", action="store_true", help="Seed from IDENA WFS (Navarra full)")
+    parser.add_argument("--navarra", type=str, metavar="PATH",
+                        help="Seed from Navarra 2024 shapefile (Malla_Lidar_2024_EPSG25830.shp)")
     parser.add_argument("--shapefile", type=str, help="Path to CNIG shapefile")
     parser.add_argument("--source", type=str, default="PNOA", help="Source name for shapefile")
+    parser.add_argument("--clear", action="store_true", help="Clear existing entries before seeding")
     parser.add_argument("--verify", action="store_true", help="Only verify current coverage")
     args = parser.parse_args()
 
@@ -270,15 +293,18 @@ def main():
         if args.example:
             seed_example_tiles(db)
 
-        if args.idena:
-            seed_from_idena_wfs(db)
+        if args.navarra:
+            seed_from_navarra_shapefile(db, args.navarra, clear_existing=args.clear)
 
         if args.shapefile:
             seed_from_shapefile(db, args.shapefile, args.source)
 
-        if not any([args.example, args.idena, args.shapefile]):
+        if not any([args.example, args.navarra, args.shapefile]):
             parser.print_help()
-            print("\nNo action specified. Use --example, --idena, or --shapefile")
+            print("\nNo action specified. Use --navarra, --shapefile, or --example")
+            print("\nRecommended for Navarra:")
+            print("  1. Download: https://filescartografia.navarra.es/5_LIDAR/Mallas/2024/")
+            print("  2. Run: python seed_coverage.py --navarra Malla_Lidar_2024_EPSG25830.shp")
             return
 
         # Always verify after seeding

@@ -1,18 +1,17 @@
 /**
  * LIDAR Layer Control - Premium Control Panel
- * 
+ *
  * Features:
  * - Check PNOA coverage with visual feedback
  * - Download from PNOA or upload custom .LAZ file
  * - Configure processing options (colorization, tree detection)
  * - Job progress monitoring with animations
- * - Layer management with premium UI
+ * - Layer management with delete confirmation
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Layers,
-  Download,
   Upload,
   Settings,
   RefreshCw,
@@ -23,20 +22,14 @@ import {
   Palette,
   Sparkles,
   Cloud,
-  Database
+  Database,
+  Trash2,
 } from 'lucide-react';
-import { useUIKit } from '../../hooks/useUIKit';
+import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 
-const COLOR_MODE_OPTIONS: { value: ColorMode; label: string; icon: string; desc: string }[] = [
-  { value: 'height', label: 'Altura', icon: '📏', desc: 'Gradiente por elevación' },
-  { value: 'ndvi', label: 'NDVI', icon: '🌿', desc: 'Índice de vegetación' },
-  { value: 'rgb', label: 'Color', icon: '🎨', desc: 'Colores originales' },
-  { value: 'classification', label: 'Clase', icon: '🏷️', desc: 'Clasificación LiDAR' },
-];
-
 const LidarLayerControl: React.FC = () => {
-  const { Card } = useUIKit();
+  const { t } = useTranslation('lidar');
   const {
     selectedEntityId,
     selectedEntityGeometry,
@@ -52,13 +45,39 @@ const LidarLayerControl: React.FC = () => {
     checkCoverage,
     layers,
     refreshLayers,
+    deleteLayer,
   } = useLidarContext();
 
   const [showSettings, setShowSettings] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [deletingLayerId, setDeletingLayerId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const COLOR_MODE_OPTIONS: { value: ColorMode; label: string; icon: string; desc: string }[] = [
+    { value: 'height', label: t('color.height'), icon: '\u{1F4CF}', desc: t('color.height.desc') },
+    { value: 'ndvi', label: t('color.ndvi'), icon: '\u{1F33F}', desc: t('color.ndvi.desc') },
+    { value: 'rgb', label: t('color.rgb'), icon: '\u{1F3A8}', desc: t('color.rgb.desc') },
+    { value: 'classification', label: t('color.classification'), icon: '\u{1F3F7}\uFE0F', desc: t('color.classification.desc') },
+  ];
+
+  // Auto-dismiss errors after 8 seconds
+  const setErrorWithTimeout = useCallback((error: string | null) => {
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    setUploadError(error);
+    if (error) {
+      errorTimeoutRef.current = setTimeout(() => setUploadError(null), 8000);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    };
+  }, []);
 
   // Check coverage when entity is selected
   useEffect(() => {
@@ -73,29 +92,28 @@ const LidarLayerControl: React.FC = () => {
 
   const handleStartProcessing = async () => {
     try {
-      setUploadError(null);
+      setErrorWithTimeout(null);
       await startProcessing();
-    } catch (error: any) {
-      setUploadError(error.message || 'Error al procesar');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : t('errorProcessing');
+      setErrorWithTimeout(msg);
     }
   };
 
   const handleFileUpload = async (file: File) => {
-    // Validate file extension
     if (!file.name.toLowerCase().endsWith('.laz') && !file.name.toLowerCase().endsWith('.las')) {
-      setUploadError('Solo se permiten archivos .LAZ o .LAS');
+      setErrorWithTimeout(t('errorFileType'));
       return;
     }
 
-    // Validate file size (max 500MB)
     const maxSize = 500 * 1024 * 1024;
     if (file.size > maxSize) {
-      setUploadError('El archivo es demasiado grande (máx. 500MB)');
+      setErrorWithTimeout(t('errorFileSize'));
       return;
     }
 
     setIsUploading(true);
-    setUploadError(null);
+    setErrorWithTimeout(null);
 
     try {
       const formData = new FormData();
@@ -106,7 +124,7 @@ const LidarLayerControl: React.FC = () => {
       }
       formData.append('config', JSON.stringify(processingConfig));
 
-      const auth = (window as any).__nekazariAuth;
+      const auth = window.__nekazariAuth;
       const headers: HeadersInit = {};
       if (auth?.token) {
         headers['Authorization'] = `Bearer ${auth.token}`;
@@ -120,14 +138,13 @@ const LidarLayerControl: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Error al subir el archivo');
+        throw new Error(errorData.detail || t('errorUpload'));
       }
 
-      console.log('[LidarLayerControl] Upload started');
       await refreshLayers();
-    } catch (error: any) {
-      console.error('[LidarLayerControl] Upload error:', error);
-      setUploadError(error.message || 'Error al subir el archivo');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : t('errorUpload');
+      setErrorWithTimeout(msg);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -157,6 +174,19 @@ const LidarLayerControl: React.FC = () => {
     setIsDragOver(false);
   };
 
+  const handleDeleteLayer = async (layerId: string) => {
+    setDeletingLayerId(layerId);
+    try {
+      await deleteLayer(layerId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Delete failed';
+      setErrorWithTimeout(msg);
+    } finally {
+      setDeletingLayerId(null);
+      setConfirmDeleteId(null);
+    }
+  };
+
   // =========================================================================
   // Render: No entity selected
   // =========================================================================
@@ -168,8 +198,8 @@ const LidarLayerControl: React.FC = () => {
           <div className="p-3 rounded-full bg-slate-100">
             <Layers className="w-6 h-6 text-slate-400" />
           </div>
-          <p className="text-sm font-medium">Selecciona una parcela</p>
-          <p className="text-xs text-slate-400">para activar capas LiDAR</p>
+          <p className="text-sm font-medium">{t('selectParcel')}</p>
+          <p className="text-xs text-slate-400">{t('toActivateLidar')}</p>
         </div>
       </div>
     );
@@ -196,7 +226,7 @@ const LidarLayerControl: React.FC = () => {
                 ? 'bg-violet-100 text-violet-600'
                 : 'hover:bg-slate-100 text-slate-500'
               }`}
-            title="Configuración"
+            title={t('settings')}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -209,14 +239,14 @@ const LidarLayerControl: React.FC = () => {
           <div className="p-4 bg-slate-50 rounded-xl space-y-4 border border-slate-200 lidar-slide-in">
             <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-violet-500" />
-              Opciones de Procesamiento
+              {t('processingOptions')}
             </h4>
 
             {/* Color Mode */}
             <div>
               <label className="lidar-label flex items-center gap-1 mb-2">
                 <Palette className="w-3 h-3" />
-                Colorización
+                {t('colorization')}
               </label>
               <select
                 value={processingConfig.colorize_by}
@@ -247,7 +277,7 @@ const LidarLayerControl: React.FC = () => {
               />
               <div className="flex items-center gap-2">
                 <TreeDeciduous className="w-4 h-4 text-emerald-500" />
-                <span className="text-sm text-slate-700">Detectar árboles</span>
+                <span className="text-sm text-slate-700">{t('detectTrees')}</span>
               </div>
             </label>
 
@@ -255,7 +285,7 @@ const LidarLayerControl: React.FC = () => {
             {processingConfig.detect_trees && (
               <div className="ml-4 pl-4 border-l-2 border-emerald-200 space-y-3 lidar-slide-in">
                 <div>
-                  <label className="text-xs text-slate-500 block mb-1">Altura mínima (m)</label>
+                  <label className="text-xs text-slate-500 block mb-1">{t('minHeight')}</label>
                   <input
                     type="number"
                     value={processingConfig.tree_min_height}
@@ -270,7 +300,7 @@ const LidarLayerControl: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 block mb-1">Radio búsqueda (m)</label>
+                  <label className="text-xs text-slate-500 block mb-1">{t('searchRadius')}</label>
                   <input
                     type="number"
                     value={processingConfig.tree_search_radius}
@@ -295,7 +325,7 @@ const LidarLayerControl: React.FC = () => {
             <div className="flex items-center gap-2 mb-3">
               <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
               <span className="text-sm font-semibold text-violet-900">
-                Procesando...
+                {t('processing')}
               </span>
             </div>
             <div className="lidar-progress mb-2">
@@ -305,7 +335,7 @@ const LidarLayerControl: React.FC = () => {
               />
             </div>
             <p className="text-xs text-violet-700">
-              {processingJob.status_message || 'Procesando nube de puntos...'}
+              {processingJob.status_message || t('processingPointCloud')}
             </p>
           </div>
         )}
@@ -324,7 +354,7 @@ const LidarLayerControl: React.FC = () => {
             <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200">
               <div className="flex items-center gap-2 mb-3">
                 <div className="lidar-status-dot lidar-status-dot-success" />
-                <span className="text-sm font-semibold text-emerald-900">Capa Activa</span>
+                <span className="text-sm font-semibold text-emerald-900">{t('activeLayer')}</span>
               </div>
 
               {/* Color Mode Pills */}
@@ -348,7 +378,7 @@ const LidarLayerControl: React.FC = () => {
               className="lidar-btn lidar-btn-secondary w-full flex items-center justify-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
-              Actualizar capas
+              {t('refreshLayers')}
             </button>
           </div>
         )}
@@ -363,12 +393,12 @@ const LidarLayerControl: React.FC = () => {
                 {hasCoverage ? (
                   <>
                     <CheckCircle className="w-3.5 h-3.5" />
-                    Cobertura PNOA disponible
+                    {t('coverageAvailable')}
                   </>
                 ) : (
                   <>
                     <Cloud className="w-3.5 h-3.5" />
-                    Sin cobertura PNOA
+                    {t('noCoverage')}
                   </>
                 )}
               </div>
@@ -381,13 +411,13 @@ const LidarLayerControl: React.FC = () => {
               className="lidar-btn lidar-btn-primary w-full flex items-center justify-center gap-2"
             >
               <Database className="w-4 h-4" />
-              <span>{hasCoverage ? 'Descargar de PNOA' : 'Sin cobertura'}</span>
+              <span>{hasCoverage ? t('downloadPnoa') : t('noCoverage')}</span>
             </button>
 
             {/* Divider */}
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
-              <span className="text-xs text-slate-400 font-medium">o</span>
+              <span className="text-xs text-slate-400 font-medium">{t('or')}</span>
               <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
             </div>
 
@@ -414,10 +444,10 @@ const LidarLayerControl: React.FC = () => {
                 )}
                 <div className="text-center">
                   <p className="text-sm font-medium text-slate-700">
-                    {isUploading ? 'Subiendo...' : 'Subir archivo .LAZ'}
+                    {isUploading ? t('uploading') : t('uploadLaz')}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Dron LiDAR con georreferenciación
+                    {t('droneLidar')}
                   </p>
                 </div>
               </div>
@@ -430,23 +460,55 @@ const LidarLayerControl: React.FC = () => {
           <div className="pt-4 border-t border-slate-100">
             <h4 className="lidar-label mb-3 flex items-center gap-1">
               <Layers className="w-3 h-3" />
-              Capas Disponibles
+              {t('availableLayers')}
             </h4>
-            <div className="space-y-2 max-h-32 overflow-y-auto lidar-scrollbar">
+            <div className="space-y-2 max-h-40 overflow-y-auto lidar-scrollbar">
               {layers.map((layer) => (
-                <div
-                  key={layer.id}
-                  className="lidar-layer-item text-xs"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                    <span className="text-slate-700 font-medium truncate">
-                      {layer.source}
-                    </span>
+                <div key={layer.id}>
+                  <div className="lidar-layer-item text-xs">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />
+                      <span className="text-slate-700 font-medium truncate">
+                        {layer.source}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">
+                        {layer.point_count ? `${(layer.point_count / 1000000).toFixed(1)}M` : ''}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(confirmDeleteId === layer.id ? null : layer.id);
+                        }}
+                        className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                        title={t('deleteLayer')}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  <span className="text-slate-400">
-                    {layer.point_count ? `${(layer.point_count / 1000000).toFixed(1)}M` : ''}
-                  </span>
+                  {/* Delete confirmation */}
+                  {confirmDeleteId === layer.id && (
+                    <div className="mt-1 p-2 bg-red-50 rounded-lg border border-red-200 lidar-slide-in">
+                      <p className="text-xs text-red-700 mb-2">{t('deleteConfirm')}</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDeleteLayer(layer.id)}
+                          disabled={deletingLayerId === layer.id}
+                          className="flex-1 text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deletingLayerId === layer.id ? t('deleting') : t('deleteLayer')}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="flex-1 text-xs px-2 py-1 bg-white text-slate-700 rounded border border-slate-200 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -458,4 +520,3 @@ const LidarLayerControl: React.FC = () => {
 };
 
 export default LidarLayerControl;
-

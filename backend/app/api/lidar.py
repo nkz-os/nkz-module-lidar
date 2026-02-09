@@ -419,30 +419,37 @@ async def upload_laz_file(
             detail="Only .LAZ and .LAS files are supported"
         )
     
-    # Validate file size (500MB max)
-    max_size = 500 * 1024 * 1024
-    content = await file.read()
-    if len(content) > max_size:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is 500MB."
-        )
-    
     # Parse config JSON
     try:
         config_dict = json.loads(config) if config else {}
     except json.JSONDecodeError:
         config_dict = {}
-    
-    # Save file to temp location
+
+    # Save file to temp location, streaming in chunks to avoid loading into memory
+    max_size = 500 * 1024 * 1024
     temp_dir = tempfile.mkdtemp(prefix="lidar_upload_")
     temp_file_path = os.path.join(temp_dir, f"upload.{file_ext}")
-    
+
     try:
+        bytes_written = 0
+        chunk_size = 1024 * 1024  # 1MB chunks
         with open(temp_file_path, 'wb') as f:
-            f.write(content)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > max_size:
+                    f.close()
+                    os.remove(temp_file_path)
+                    os.rmdir(temp_dir)
+                    raise HTTPException(
+                        status_code=413,
+                        detail="File too large. Maximum size is 500MB."
+                    )
+                f.write(chunk)
         
-        logger.info(f"Uploaded file saved to {temp_file_path} ({len(content)} bytes)")
+        logger.info(f"Uploaded file saved to {temp_file_path} ({bytes_written} bytes)")
         
         # Create job record
         job = LidarProcessingJob(

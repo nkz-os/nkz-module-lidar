@@ -16,7 +16,8 @@
 // =============================================================================
 
 import React from 'react';
-import { Layers, Cpu, TreeDeciduous, Upload, Download, Eye } from 'lucide-react';
+import { Layers, Cpu, TreeDeciduous, Upload, Download, Eye, ArrowRight } from 'lucide-react';
+import { useTranslation } from './sdk';
 import './index.css';
 
 // Export slots for Module Federation
@@ -44,15 +45,24 @@ const FeatureCard: React.FC<{
 
 // Main App Component (Landing Page)
 const LidarApp: React.FC = () => {
+  const { t } = useTranslation('lidar');
+
+  const pipelineSteps = [
+    { step: '01', title: t('pipeline.step1.title'), desc: t('pipeline.step1.desc') },
+    { step: '02', title: t('pipeline.step2.title'), desc: t('pipeline.step2.desc') },
+    { step: '03', title: t('pipeline.step3.title'), desc: t('pipeline.step3.desc') },
+    { step: '04', title: t('pipeline.step4.title'), desc: t('pipeline.step4.desc') },
+  ];
+
   return (
-    <div className="lidar-module min-h-screen bg-gradient-to-br from-violet-50 via-white to-cyan-50 p-6 md:p-10">
+    <div className="lidar-module bg-gradient-to-br from-violet-50 via-white to-cyan-50 p-6 md:p-10">
       <div className="max-w-5xl mx-auto">
 
         {/* Hero Section */}
         <div className="text-center mb-12 lidar-slide-in">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-100 text-violet-700 text-sm font-medium mb-6">
             <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-            Módulo Premium
+            {t('premiumModule')}
           </div>
 
           <div className="flex items-center justify-center gap-4 mb-6">
@@ -63,34 +73,41 @@ const LidarApp: React.FC = () => {
 
           <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
             <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-600 to-cyan-600">
-              LiDAR Point Cloud
+              {t('title')}
             </span>
           </h1>
 
-          <p className="text-xl text-slate-600 max-w-2xl mx-auto">
-            Visualiza y analiza nubes de puntos 3D con tecnología CesiumJS.
-            Descarga datos PNOA o sube tus propios vuelos de dron.
+          <p className="text-xl text-slate-600 max-w-2xl mx-auto mb-6">
+            {t('subtitle')}
           </p>
+
+          <a
+            href="#/viewer"
+            className="lidar-btn lidar-btn-primary inline-flex items-center gap-2"
+          >
+            {t('goToViewer')}
+            <ArrowRight className="w-4 h-4" />
+          </a>
         </div>
 
         {/* Features Grid */}
         <div className="grid md:grid-cols-3 gap-6 mb-12">
           <FeatureCard
             icon={<Download className="w-6 h-6 text-white" />}
-            title="Descarga PNOA"
-            description="Acceso automático a datos LiDAR del Plan Nacional de Ortofotografía Aérea para cualquier parcela de España."
+            title={t('feature.download.title')}
+            description={t('feature.download.desc')}
             gradient="bg-gradient-to-br from-violet-500 to-violet-600"
           />
           <FeatureCard
             icon={<Upload className="w-6 h-6 text-white" />}
-            title="Upload Personalizado"
-            description="Sube archivos .LAZ de vuelos de dron propios. Compatible con cualquier sensor LiDAR georreferenciado."
+            title={t('feature.upload.title')}
+            description={t('feature.upload.desc')}
             gradient="bg-gradient-to-br from-cyan-500 to-cyan-600"
           />
           <FeatureCard
             icon={<TreeDeciduous className="w-6 h-6 text-white" />}
-            title="Detección de Árboles"
-            description="Algoritmos avanzados de segmentación para identificar árboles individuales, altura y área de copa."
+            title={t('feature.trees.title')}
+            description={t('feature.trees.desc')}
             gradient="bg-gradient-to-br from-emerald-500 to-emerald-600"
           />
         </div>
@@ -99,22 +116,17 @@ const LidarApp: React.FC = () => {
         <div className="lidar-card p-8 mb-12">
           <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3">
             <Cpu className="w-6 h-6 text-violet-500" />
-            Pipeline de Procesamiento
+            {t('pipeline.title')}
           </h2>
 
           <div className="grid md:grid-cols-4 gap-6">
-            {[
-              { step: '01', title: 'Ingesta', desc: 'Descarga y recorte al polígono' },
-              { step: '02', title: 'Fusión Espectral', desc: 'Colorización NDVI opcional' },
-              { step: '03', title: 'Segmentación', desc: 'Detección CHM + Watershed' },
-              { step: '04', title: 'Tiling 3D', desc: 'Conversión a 3D Tiles (Cesium)' },
-            ].map((item, i) => (
+            {pipelineSteps.map((item, i) => (
               <div key={i} className="relative">
                 <div className="text-4xl font-bold text-violet-100 mb-2">{item.step}</div>
                 <h3 className="font-semibold text-slate-800 mb-1">{item.title}</h3>
                 <p className="text-sm text-slate-600">{item.desc}</p>
                 {i < 3 && (
-                  <div className="hidden md:block absolute top-4 -right-3 text-violet-300 text-2xl">→</div>
+                  <div className="hidden md:block absolute top-4 -right-3 text-violet-300 text-2xl">&rarr;</div>
                 )}
               </div>
             ))}
@@ -125,31 +137,31 @@ const LidarApp: React.FC = () => {
         <div className="lidar-card p-8">
           <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-3">
             <Eye className="w-6 h-6 text-cyan-500" />
-            Cómo Usar
+            {t('howTo.title')}
           </h2>
 
           <div className="space-y-4">
             <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 hover:bg-violet-50 transition-colors">
               <div className="w-8 h-8 rounded-full bg-violet-500 text-white flex items-center justify-center flex-shrink-0 font-semibold">1</div>
               <div>
-                <h3 className="font-semibold text-slate-800">Selecciona una Parcela</h3>
-                <p className="text-sm text-slate-600">En el visor unificado, haz clic en cualquier parcela (AgriParcel) para activar el módulo LiDAR.</p>
+                <h3 className="font-semibold text-slate-800">{t('howTo.step1.title')}</h3>
+                <p className="text-sm text-slate-600">{t('howTo.step1.desc')}</p>
               </div>
             </div>
 
             <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 hover:bg-cyan-50 transition-colors">
               <div className="w-8 h-8 rounded-full bg-cyan-500 text-white flex items-center justify-center flex-shrink-0 font-semibold">2</div>
               <div>
-                <h3 className="font-semibold text-slate-800">Elige la Fuente de Datos</h3>
-                <p className="text-sm text-slate-600">Descarga automáticamente desde PNOA o sube tu propio archivo .LAZ de un vuelo de dron.</p>
+                <h3 className="font-semibold text-slate-800">{t('howTo.step2.title')}</h3>
+                <p className="text-sm text-slate-600">{t('howTo.step2.desc')}</p>
               </div>
             </div>
 
             <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 hover:bg-emerald-50 transition-colors">
               <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center flex-shrink-0 font-semibold">3</div>
               <div>
-                <h3 className="font-semibold text-slate-800">Visualiza en 3D</h3>
-                <p className="text-sm text-slate-600">La nube de puntos se carga en CesiumJS con colorización dinámica (altura, NDVI, clasificación).</p>
+                <h3 className="font-semibold text-slate-800">{t('howTo.step3.title')}</h3>
+                <p className="text-sm text-slate-600">{t('howTo.step3.desc')}</p>
               </div>
             </div>
           </div>
@@ -158,9 +170,7 @@ const LidarApp: React.FC = () => {
         {/* Footer Note */}
         <div className="mt-8 text-center">
           <p className="text-sm text-slate-500">
-            Este módulo se integra automáticamente con el visor unificado mediante slots.
-            <br />
-            Navega al mapa y selecciona una parcela para comenzar.
+            {t('footer')}
           </p>
         </div>
       </div>

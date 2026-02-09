@@ -16,7 +16,7 @@
    CSS Custom Properties
    ============================================================================ */
 
-:root {
+.lidar-module {
   /* Primary - Deep Purple/Indigo gradient theme */
   --lidar-primary-50: #f5f3ff;
   --lidar-primary-100: #ede9fe;
