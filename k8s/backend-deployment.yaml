@@ -45,9 +45,14 @@ spec:
                 secretKeyRef:
                   name: postgresql-secret
                   key: postgres-url
-            # Redis
+            # Redis (with password from secret)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
             - name: REDIS_URL
-              value: "redis://redis-service:6379/0"
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
             # MinIO (use existing minio-secret)
             - name: MINIO_ENDPOINT
               value: "minio-service:9000"

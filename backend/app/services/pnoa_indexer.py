@@ -94,7 +94,7 @@ class PNOAIndexer:
                     "flight_year": tile.flight_year,
                     "point_density": tile.point_density,
                     "laz_url": tile.laz_url,
-                    "metadata": tile.metadata
+                    "metadata": tile.extra_metadata
                 }
                 for tile in results
             ]
