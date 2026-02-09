@@ -84,6 +84,11 @@ spec:
               value: "https://auth.artotxiki.com/auth/realms/nekazari/protocol/openid-connect/certs"
             - name: JWT_ALGORITHM
               value: "RS256"
+            # PROJ data path for GDAL/PDAL CRS operations
+            - name: PROJ_DATA
+              value: "/opt/conda/share/proj"
+            - name: PROJ_LIB
+              value: "/opt/conda/share/proj"
           resources:
             requests:
               memory: "256Mi"
@@ -181,6 +186,11 @@ spec:
               value: "lidar-processing"
             - name: WORKER_TIMEOUT
               value: "1800"
+            # PROJ data path for GDAL/PDAL CRS operations
+            - name: PROJ_DATA
+              value: "/opt/conda/share/proj"
+            - name: PROJ_LIB
+              value: "/opt/conda/share/proj"
           resources:
             # Reduced for single-node cluster
             requests:

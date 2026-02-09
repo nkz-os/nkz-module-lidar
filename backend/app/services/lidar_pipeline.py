@@ -706,28 +706,38 @@ class LidarPipeline:
         """Read CRS from the input LAZ file header (lightweight, header-only read)."""
         try:
             with laspy.open(self.input_laz) as reader:
-                crs_vlrs = [v for v in reader.header.vlrs
-                            if v.user_id == "LASF_Projection"]
+                for vlr in reader.header.vlrs:
+                    # laspy 2.7+ parses WKT VLRs into WktCoordinateSystemVlr objects
+                    if hasattr(vlr, 'parse_crs'):
+                        try:
+                            crs = vlr.parse_crs()
+                            if crs:
+                                return crs
+                        except Exception:
+                            pass
 
-                # Try OGC WKT (record_id 2112)
-                for vlr in crs_vlrs:
-                    if vlr.record_id == 2112:
-                        wkt_str = vlr.record_data.decode('utf-8', errors='ignore').rstrip('\x00').strip()
-                        if wkt_str:
-                            return pyproj.CRS.from_wkt(wkt_str)
+                    # Fallback: read raw bytes from any projection VLR
+                    if getattr(vlr, 'user_id', '') == "LASF_Projection":
+                        # OGC WKT (record_id 2112)
+                        if vlr.record_id == 2112:
+                            raw = getattr(vlr, 'record_data_bytes', None) or getattr(vlr, 'record_data', None)
+                            if raw:
+                                wkt_str = raw.decode('utf-8', errors='ignore').rstrip('\x00').strip()
+                                if wkt_str:
+                                    return pyproj.CRS.from_wkt(wkt_str)
 
-                # Try GeoTIFF GeoKeyDirectoryTag (record_id 34735) for EPSG code
-                for vlr in crs_vlrs:
-                    if vlr.record_id == 34735 and len(vlr.record_data) >= 16:
-                        n_keys = struct.unpack('<H', vlr.record_data[6:8])[0]
-                        for i in range(n_keys):
-                            off = 8 + i * 8
-                            if off + 8 > len(vlr.record_data):
-                                break
-                            key_id, loc, _, val = struct.unpack('<4H', vlr.record_data[off:off+8])
-                            # ProjectedCSTypeGeoKey=3072, GeographicTypeGeoKey=2048
-                            if key_id in (3072, 2048) and loc == 0 and val > 0:
-                                return pyproj.CRS.from_epsg(val)
+                        # GeoTIFF GeoKeyDirectoryTag (record_id 34735) for EPSG code
+                        if vlr.record_id == 34735:
+                            raw = getattr(vlr, 'record_data_bytes', None) or getattr(vlr, 'record_data', None)
+                            if raw and len(raw) >= 16:
+                                n_keys = struct.unpack('<H', raw[6:8])[0]
+                                for i in range(n_keys):
+                                    off = 8 + i * 8
+                                    if off + 8 > len(raw):
+                                        break
+                                    key_id, loc, _, val = struct.unpack('<4H', raw[off:off+8])
+                                    if key_id in (3072, 2048) and loc == 0 and val > 0:
+                                        return pyproj.CRS.from_epsg(val)
         except Exception as e:
             logger.warning(f"Could not read CRS from LAZ header: {e}")
 
