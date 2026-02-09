@@ -410,6 +410,7 @@ const LidarLayerControl: React.FC = () => {
               onClick={handleStartProcessing}
               disabled={isProcessing || !hasCoverage}
               className="lidar-btn lidar-btn-primary w-full flex items-center justify-center gap-2"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%)' }}
             >
               <Database className="w-4 h-4" />
               <span>{hasCoverage ? t('downloadPnoa') : t('noCoverage')}</span>
