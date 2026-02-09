@@ -495,15 +495,19 @@ class LidarPipeline:
         self.output_tiles_dir = os.path.join(self.work_dir, "tiles")
         
         # Use py3dtiles command line (more reliable than Python API for large files)
+        # Resolve full path - subprocess may not inherit conda PATH
+        py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
         cmd = [
-            "py3dtiles", "convert",
+            py3dtiles_bin, "convert",
             source_laz,
             "--out", self.output_tiles_dir,
             "--overwrite"
         ]
-        
+
         logger.info(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        env = os.environ.copy()
+        env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
         
         if result.returncode != 0:
             logger.error(f"py3dtiles failed: {result.stderr}")
