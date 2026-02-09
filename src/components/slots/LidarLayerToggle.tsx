@@ -38,6 +38,7 @@ const LidarLayerToggle: React.FC = () => {
   }
 
   return (
+    <div className="lidar-module" style={{ marginBottom: '12px' }}>
     <div className="px-3 py-2 space-y-2">
       {/* Status row */}
       <div className="flex items-center justify-between">
@@ -79,6 +80,7 @@ const LidarLayerToggle: React.FC = () => {
            hasCoverage ? t('coverageAvailable') : t('noCoverage')}
         </p>
       )}
+    </div>
     </div>
   );
 };

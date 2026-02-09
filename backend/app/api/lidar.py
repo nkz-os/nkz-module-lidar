@@ -20,6 +20,9 @@ from redis import Redis
 from rq import Queue
 from sqlalchemy.orm import Session
 
+from fastapi.responses import StreamingResponse
+from botocore.exceptions import ClientError
+
 from app.middleware.auth import require_auth, get_tenant_id
 from app.db import get_db
 from app.config import settings
@@ -328,7 +331,7 @@ async def delete_layer(
     
     # Delete from storage
     from app.services.storage import storage_service
-    prefix = f"tilesets/{layer.id}"
+    prefix = str(layer.id)
     storage_service.delete_prefix(prefix)
     
     # Delete database record
@@ -517,6 +520,60 @@ async def upload_laz_file(
         if os.path.exists(temp_dir):
             os.rmdir(temp_dir)
         raise
+
+
+# ============================================================================
+# Tileset File Proxy (serves 3D Tiles from MinIO)
+# ============================================================================
+
+TILESET_CONTENT_TYPES = {
+    ".json": "application/json",
+    ".pnts": "application/octet-stream",
+    ".b3dm": "application/octet-stream",
+    ".i3dm": "application/octet-stream",
+    ".cmpt": "application/octet-stream",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+}
+
+
+@router.get("/tilesets/{file_path:path}")
+async def serve_tileset_file(file_path: str):
+    """
+    Proxy endpoint that streams tileset files from MinIO.
+
+    Cesium requests tileset.json and .pnts files via this route.
+    No auth required — tilesets are public read.
+    """
+    from app.services.storage import storage_service
+
+    # Files are stored in MinIO under "{job_id}/tileset.json", "{job_id}/r.pnts", etc.
+    # The route strips "/api/lidar/tilesets/" leaving "{job_id}/..."
+    object_key = file_path
+
+    # Determine content type from extension
+    ext = os.path.splitext(file_path)[1].lower()
+    content_type = TILESET_CONTENT_TYPES.get(ext, "application/octet-stream")
+
+    try:
+        body = storage_service.get_file_stream(object_key)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("404", "NoSuchKey"):
+            raise HTTPException(status_code=404, detail="Tileset file not found")
+        logger.error(f"MinIO error serving {object_key}: {e}")
+        raise HTTPException(status_code=502, detail="Storage error")
+
+    return StreamingResponse(
+        body.iter_chunks(chunk_size=65536),
+        media_type=content_type,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 # ============================================================================

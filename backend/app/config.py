@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     
     # Public URL for serving tilesets (used by frontend)
-    TILESET_PUBLIC_URL: str = "https://nkz.artotxiki.com/lidar-tilesets"
+    TILESET_PUBLIC_URL: str = "https://nkz.artotxiki.com/api/lidar/tilesets"
     
     # Orion-LD Context Broker
     ORION_URL: str = "http://orion-ld:1026"

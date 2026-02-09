@@ -549,7 +549,7 @@ class LidarPipeline:
     
     def _upload_results(self) -> str:
         """Upload tiles to MinIO and return the public URL."""
-        prefix = f"tilesets/{self.job_id}"
+        prefix = str(self.job_id)
         tileset_url = storage_service.upload_directory(
             self.output_tiles_dir,
             prefix

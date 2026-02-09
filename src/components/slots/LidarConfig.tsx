@@ -36,7 +36,8 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
   }
 
   return (
-    <Card padding="md" className="bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl" style={{ marginBottom: '12px' }}>
+    <div className="lidar-module" style={{ marginBottom: '12px' }}>
+    <Card padding="md" className="bg-white/90 backdrop-blur-md border border-slate-200/50 rounded-xl">
       <div className="space-y-4">
         <h3 className="font-semibold text-slate-800">{t('config.title')}</h3>
 
@@ -120,6 +121,7 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
         </div>
       </div>
     </Card>
+    </div>
   );
 };
 

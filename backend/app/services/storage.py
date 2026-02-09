@@ -242,6 +242,22 @@ class StorageService:
         
         return f"{settings.TILESET_PUBLIC_URL}/{key}"
     
+    def get_file_stream(self, key: str) -> "botocore.response.StreamingBody":
+        """
+        Get a streaming response for a file in the default bucket.
+
+        Args:
+            key: Object key in the bucket
+
+        Returns:
+            StreamingBody that can be iterated over
+
+        Raises:
+            ClientError: If the file does not exist
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"]
+
     def file_exists_in_bucket(self, bucket: str, key: str) -> bool:
         """Check if a file exists in a specific bucket."""
         try:
