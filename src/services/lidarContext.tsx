@@ -139,15 +139,22 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       try {
         // Fetch entity geometry from Context Broker
-        const auth = window.__nekazariAuth;
+        const auth = window.__nekazariAuthContext ?? window.__nekazariAuth;
+        const kc = window.keycloak;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const getTokenFn = (auth as any)?.getToken;
+        const token = kc?.token
+          ?? (typeof getTokenFn === 'function' ? getTokenFn() : auth?.token);
+        const tenantId = auth?.tenantId;
+
         const headers: HeadersInit = {
           'Accept': 'application/ld+json',
         };
-        if (auth?.token) {
-          headers['Authorization'] = `Bearer ${auth.token}`;
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
-        if (auth?.tenantId) {
-          headers['NGSILD-Tenant'] = auth.tenantId;
+        if (tenantId) {
+          headers['NGSILD-Tenant'] = tenantId;
         }
 
         const response = await fetch(`/ngsi-ld/v1/entities/${encodeURIComponent(viewer.selectedEntityId)}`, {

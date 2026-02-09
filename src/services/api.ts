@@ -85,8 +85,20 @@ class LidarApiClient {
         // Base URL from environment or default
         this.baseUrl = '/api/lidar';
         this.getToken = () => {
-            // Try to get token from global context (injected by host)
-            return window.__nekazariAuth?.token ?? null;
+            // Try Keycloak instance first (same pattern as other working modules)
+            const kc = window.keycloak;
+            if (kc?.token) return kc.token;
+
+            // Fallback to host auth context
+            const hostAuth = window.__nekazariAuthContext ?? window.__nekazariAuth;
+            if (hostAuth) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const getTokenFn = (hostAuth as any).getToken;
+                if (typeof getTokenFn === 'function') return getTokenFn() ?? null;
+                if (hostAuth.token) return hostAuth.token;
+            }
+
+            return null;
         };
     }
 

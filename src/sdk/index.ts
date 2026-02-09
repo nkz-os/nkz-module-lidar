@@ -68,32 +68,40 @@ export function useViewer(): ViewerHookResult {
  * window.keycloak, localStorage fallback.
  */
 export function useAuth() {
-  const auth = window.__nekazariAuthContext ?? window.__nekazariAuth;
-
-  if (auth?.token) {
-    return {
-      user: auth.user,
-      token: auth.token,
-      tenantId: auth.tenantId,
-      isAuthenticated: true,
-      hasRole: (role: string) => auth.roles?.includes(role) ?? false,
-      hasAnyRole: (roles: string[]) => roles.some(r => auth.roles?.includes(r)),
-      getToken: () => auth.token,
-    };
-  }
-
-  // Keycloak fallback
+  // Try Keycloak instance first (same pattern as other working modules)
   const kc = window.keycloak;
   if (kc?.token) {
     return {
       user: kc.tokenParsed ?? null,
       token: kc.token,
-      tenantId: undefined,
+      tenantId: undefined as string | undefined,
       isAuthenticated: true,
       hasRole: () => false,
       hasAnyRole: () => false,
       getToken: () => kc.token,
     };
+  }
+
+  // Fallback to host auth context (getToken is a function)
+  const auth = window.__nekazariAuthContext ?? window.__nekazariAuth;
+  if (auth) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hostGetToken = (auth as any).getToken;
+    const token = typeof hostGetToken === 'function'
+      ? (hostGetToken() as string | undefined)
+      : auth.token;
+
+    if (token) {
+      return {
+        user: auth.user,
+        token,
+        tenantId: auth.tenantId,
+        isAuthenticated: true,
+        hasRole: (role: string) => auth.roles?.includes(role) ?? false,
+        hasAnyRole: (roles: string[]) => roles.some(r => auth.roles?.includes(r)),
+        getToken: () => token,
+      };
+    }
   }
 
   // localStorage fallback
@@ -115,12 +123,12 @@ export function useAuth() {
   }
   return {
     user: null,
-    token: undefined,
-    tenantId: undefined,
+    token: undefined as string | undefined,
+    tenantId: undefined as string | undefined,
     isAuthenticated: false,
     hasRole: () => false,
     hasAnyRole: () => false,
-    getToken: () => undefined,
+    getToken: () => undefined as string | undefined,
   };
 }
 

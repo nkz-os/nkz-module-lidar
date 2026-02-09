@@ -64,6 +64,9 @@ export interface NekazariAuthContext {
   token?: string;
   tenantId?: string;
   roles?: string[];
+  getToken?: () => string | undefined;
+  isAuthenticated?: boolean;
+  keycloak?: unknown;
 }
 
 export interface NekazariViewerContext {
