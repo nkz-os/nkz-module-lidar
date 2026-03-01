@@ -7,13 +7,13 @@
   "short_description": "LiDAR point cloud visualization and tree analysis",
   "author": {
     "name": "Nekazari Team",
-    "email": "nekazari@artotxiki.com",
+    "email": "nekazari@robotika.cloud",
     "organization": "Nekazari"
   },
   "developer": {
     "name": "Nekazari",
-    "website": "https://nekazari.artotxiki.com",
-    "support_email": "nekazari@artotxiki.com"
+    "website": "https://nekazari.robotika.cloud",
+    "support_email": "nekazari@robotika.cloud"
   },
   "category": "analytics",
   "module_type": "ADDON_PAID",
@@ -46,10 +46,8 @@
     ]
   },
   "build_config": {
-    "type": "remote",
-    "remote_entry_url": "/modules/lidar/assets/remoteEntry.js",
-    "scope": "lidar_module",
-    "exposed_module": "./App"
+    "type": "iife",
+    "remote_entry_url": "/modules/lidar/nkz-module.js"
   },
   "nkz_validated": {
     "security_review": true,

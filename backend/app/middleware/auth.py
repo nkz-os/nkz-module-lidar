@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # JWT configuration
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'RS256')
-JWT_ISSUER = os.getenv('JWT_ISSUER', 'https://auth.artotxiki.com/auth/realms/nekazari')
+JWT_ISSUER = os.getenv('JWT_ISSUER', '')
 JWKS_URL = os.getenv('JWKS_URL', f'{JWT_ISSUER}/protocol/openid-connect/certs')
 
 # Cache for JWKS
