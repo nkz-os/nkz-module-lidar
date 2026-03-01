@@ -62,7 +62,7 @@ app = FastAPI(
 # CORS middleware
 _cors_origins = os.getenv(
     "CORS_ORIGINS",
-    "https://nekazari.artotxiki.com,https://nkz.artotxiki.com"
+    "http://localhost:3000"
 )
 app.add_middleware(
     CORSMiddleware,

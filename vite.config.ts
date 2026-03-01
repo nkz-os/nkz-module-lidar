@@ -1,57 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import federation from '@originjs/vite-plugin-federation';
 import path from 'path';
 
-// https://vitejs.dev/config/
+// IIFE build for Nekazari runtime module injection
 export default defineConfig({
   plugins: [
-    react(),
-    federation({
-      name: 'lidar_module',
-      filename: 'remoteEntry.js',
-      exposes: {
-        // Main app component
-        './App': './src/App.tsx',
-        // viewerSlots for unified viewer integration - MUST be named './viewerSlots' for host compatibility
-        './viewerSlots': './src/slots/index.tsx',
-        // Individual components (for direct import)
-        './LidarLayerToggle': './src/components/slots/LidarLayerToggle.tsx',
-        './LidarLayerControl': './src/components/slots/LidarLayerControl.tsx',
-        './LidarLayer': './src/components/slots/LidarLayer.tsx',
-        './LidarConfig': './src/components/slots/LidarConfig.tsx',
-        // Context provider
-        './LidarProvider': './src/services/lidarContext.tsx',
-      },
-      shared: {
-        'react': {
-          singleton: true,
-          requiredVersion: '^18.3.1',
-          import: false,
-          shareScope: 'default',
-        },
-        'react-dom': {
-          singleton: true,
-          requiredVersion: '^18.3.1',
-          import: false,
-          shareScope: 'default',
-        },
-        'react-router-dom': {
-          singleton: true,
-          requiredVersion: '^6.26.0',
-          import: false,
-          shareScope: 'default',
-        },
-        '@nekazari/ui-kit': {
-          singleton: true,
-          requiredVersion: '^1.0.0',
-          import: false,
-          shareScope: 'default',
-        },
-        // Note: @nekazari/sdk is implemented locally in src/sdk/
-        // It connects to window.__nekazariViewerContext provided by the host
-      },
-    }),
+    react({ jsxRuntime: 'classic' }),
   ],
   resolve: {
     alias: {
@@ -62,27 +16,43 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5004,
     cors: true,
-    // Proxy API calls to avoid CORS issues in development
     proxy: {
       '/api': {
-        target: 'https://nkz.artotxiki.com',
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         secure: true,
       },
     },
   },
   build: {
-    target: 'esnext',
-    minify: false,  // Keep false for Module Federation compatibility
+    target: 'es2020',
+    minify: true,
     cssCodeSplit: false,
+    lib: {
+      entry: path.resolve(__dirname, 'src/moduleEntry.ts'),
+      name: 'NkzModuleLidar',
+      formats: ['iife'],
+      fileName: () => 'nkz-module.js',
+    },
     rollupOptions: {
-      external: ['react', 'react-dom', 'react-router-dom'],
+      external: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react-router-dom',
+        '@nekazari/sdk',
+        '@nekazari/ui-kit',
+      ],
       output: {
         globals: {
           'react': 'React',
           'react-dom': 'ReactDOM',
+          'react-dom/client': 'ReactDOM',
           'react-router-dom': 'ReactRouterDOM',
+          '@nekazari/sdk': '__NKZ_SDK__',
+          '@nekazari/ui-kit': '__NKZ_UI__',
         },
+        inlineDynamicImports: true,
       },
     },
   },

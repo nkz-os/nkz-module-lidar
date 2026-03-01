@@ -25,13 +25,13 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     
     # Public URL for serving tilesets (used by frontend)
-    TILESET_PUBLIC_URL: str = "https://nkz.artotxiki.com/api/lidar/tilesets"
+    TILESET_PUBLIC_URL: str = "/api/lidar/tilesets"
     
     # Orion-LD Context Broker
     ORION_URL: str = "http://orion-ld:1026"
     
     # Keycloak (for token validation)
-    KEYCLOAK_URL: str = "https://auth.artotxiki.com/auth"
+    KEYCLOAK_URL: str = "http://keycloak:8080/auth"
     KEYCLOAK_REALM: str = "nekazari"
     
     # PNOA / CNIG data source
