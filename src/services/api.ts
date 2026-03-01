@@ -79,34 +79,15 @@ export interface DetectedTree {
 
 class LidarApiClient {
     private baseUrl: string;
-    private getToken: () => string | null;
 
     constructor() {
-        // Base URL from environment or default
         this.baseUrl = '/api/lidar';
-        this.getToken = () => {
-            // Try Keycloak instance first (same pattern as other working modules)
-            const kc = window.keycloak;
-            if (kc?.token) return kc.token;
-
-            // Fallback to host auth context
-            const hostAuth = window.__nekazariAuthContext ?? window.__nekazariAuth;
-            if (hostAuth) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const getTokenFn = (hostAuth as any).getToken;
-                if (typeof getTokenFn === 'function') return getTokenFn() ?? null;
-                if (hostAuth.token) return hostAuth.token;
-            }
-
-            return null;
-        };
     }
 
     private async request<T>(
         endpoint: string,
         options: RequestInit = {}
     ): Promise<T> {
-        const token = this.getToken();
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
         };
@@ -117,12 +98,8 @@ class LidarApiClient {
             Object.assign(headers, extra);
         }
 
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
         // Add tenant ID header
-        const authCtx = window.__nekazariAuthContext ?? window.__nekazariAuth;
+        const authCtx = (window as any).__nekazariAuthContext;
         const tenantId = authCtx?.tenantId;
         if (tenantId) {
             headers['X-Tenant-ID'] = tenantId;
@@ -131,6 +108,7 @@ class LidarApiClient {
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
             ...options,
             headers,
+            credentials: 'include',
         });
 
         if (!response.ok) {

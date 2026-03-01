@@ -104,15 +104,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
 
     if (!activeTilesetUrl) return;
 
-    // Auth and tenant so tile requests (tileset.json + tile content) succeed
-    const authCtx = typeof window !== 'undefined' ? (window as any).__nekazariAuthContext ?? (window as any).__nekazariAuth : undefined;
-    const token =
-      (typeof window !== 'undefined' && (window as any).keycloak?.token) ||
-      (authCtx?.getToken?.()) ||
-      null;
+    // TODO: Cesium Resource does not support httpOnly cookies for tile requests.
+    // Tiles served from the same origin will get cookies automatically, but cross-origin
+    // tile URLs need a proxy or backend change to validate via cookie instead of Bearer.
+    // See PENDING.md for details.
+    const authCtx = typeof window !== 'undefined' ? (window as any).__nekazariAuthContext : undefined;
     const tenantId = authCtx?.tenantId ?? null;
     const requestHeaders: Record<string, string> = {};
-    if (token) requestHeaders.Authorization = `Bearer ${token}`;
     if (tenantId) requestHeaders['X-Tenant-ID'] = tenantId;
 
     const loadTileset = async () => {
@@ -126,7 +124,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
           dynamicScreenSpaceErrorFactor: 4.0,
         };
 
-        // Use Resource with headers so Cesium sends Authorization on tileset + tile requests
+        // Use Resource with headers for tenant routing
         if (Object.keys(requestHeaders).length > 0 && Cesium.Resource) {
           const resource = new Cesium.Resource({ url: activeTilesetUrl, headers: requestHeaders });
           if (Cesium.Cesium3DTileset.fromUrl) {

@@ -69,19 +69,19 @@ spec:
             - name: MINIO_BUCKET
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
-              value: "https://nkz.artotxiki.com/api/lidar/tilesets"
+              value: "https://nkz.robotika.cloud/api/lidar/tilesets"
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
             # Authentication (Keycloak)
             - name: KEYCLOAK_URL
-              value: "https://auth.artotxiki.com/auth"
+              value: "https://auth.robotika.cloud/auth"
             - name: KEYCLOAK_REALM
               value: "nekazari"
             - name: JWT_ISSUER
-              value: "https://auth.artotxiki.com/auth/realms/nekazari"
+              value: "https://auth.robotika.cloud/auth/realms/nekazari"
             - name: JWKS_URL
-              value: "https://auth.artotxiki.com/auth/realms/nekazari/protocol/openid-connect/certs"
+              value: "https://auth.robotika.cloud/auth/realms/nekazari/protocol/openid-connect/certs"
             - name: JWT_ALGORITHM
               value: "RS256"
             # PROJ data path for GDAL/PDAL CRS operations
@@ -177,7 +177,7 @@ spec:
             - name: MINIO_BUCKET
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
-              value: "https://nkz.artotxiki.com/api/lidar/tilesets"
+              value: "https://nkz.robotika.cloud/api/lidar/tilesets"
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"

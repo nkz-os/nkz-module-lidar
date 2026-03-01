@@ -124,18 +124,8 @@ const LidarLayerControl: React.FC = () => {
       }
       formData.append('config', JSON.stringify(processingConfig));
 
-      // Get token using same cascade as api.ts
-      const kc = window.keycloak;
-      const authCtx = window.__nekazariAuthContext ?? window.__nekazariAuth;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const getTokenFn = (authCtx as any)?.getToken;
-      const token = kc?.token
-        ?? (typeof getTokenFn === 'function' ? getTokenFn() : authCtx?.token);
-
+      const authCtx = (window as any).__nekazariAuthContext;
       const headers: HeadersInit = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
       if (authCtx?.tenantId) {
         headers['X-Tenant-ID'] = authCtx.tenantId;
       }
@@ -143,6 +133,7 @@ const LidarLayerControl: React.FC = () => {
       const response = await fetch('/api/lidar/upload', {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: formData,
       });
 
