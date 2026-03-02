@@ -79,10 +79,25 @@ def get_tenant_id(request: Request) -> str:
 
 
 async def require_auth(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> dict:
-    """Dependency to require authentication."""
-    token = credentials.credentials
+    """Dependency to require authentication.
+    Reads token from Authorization header or httpOnly cookie (fallback).
+    """
+    token = None
+    if credentials:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get('nkz_token')
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authorization token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = await verify_token(token)
     return payload
 
