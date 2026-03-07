@@ -94,10 +94,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - nekazari.artotxiki.com
+        - nekazari.robotika.cloud
       secretName: nekazari-tls
   rules:
-    - host: nekazari.artotxiki.com
+    - host: nekazari.robotika.cloud
       http:
         paths:
           - path: /modules/lidar
