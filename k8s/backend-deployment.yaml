@@ -29,8 +29,6 @@ spec:
         component: backend
         module: lidar
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: api
           image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest
@@ -133,8 +131,6 @@ spec:
         component: worker
         module: lidar
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: worker
           image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest

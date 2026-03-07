@@ -28,8 +28,6 @@ spec:
         component: frontend
         module: lidar
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: frontend
           image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest
