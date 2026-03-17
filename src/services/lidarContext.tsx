@@ -133,7 +133,9 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Sync with host viewer context - fetch geometry when entity changes
   useEffect(() => {
     const fetchGeometry = async () => {
-      if (!viewer.selectedEntityId || viewer.selectedEntityType !== 'AgriParcel') {
+      const entityType = viewer.selectedEntityType ?? '';
+      const isAgriParcel = entityType === 'AgriParcel' || entityType.endsWith('/AgriParcel');
+      if (!viewer.selectedEntityId || !isAgriParcel) {
         setSelectedEntityGeometry(null);
         setSelectedLayerId(null);
         setActiveTilesetUrl(null);
