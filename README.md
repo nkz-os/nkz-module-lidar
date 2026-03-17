@@ -17,7 +17,7 @@ LIDAR Point Cloud Viewer module for the Nekazari Platform. This module enables v
 - Integration with IDENA data sources
 
 ### Frontend
-- React application with Module Federation
+- React application compiled as a single-file IIFE bundle (runtime script injection)
 - Integration with unified viewer via slots
 - CesiumJS 3D Tiles visualization
 
@@ -45,23 +45,42 @@ npm run dev  # Starts on port 5004
 
 ## Deployment
 
-### Build Docker Images
+### Build Frontend IIFE Bundle
 
-Build context matters: the backend Dockerfile expects files from `backend/` (e.g. `environment.yml`), so use `./backend` as context. The frontend uses the repo root.
+The Nekazari host loads modules at runtime by injecting a `<script>` tag that points to a single-file IIFE bundle.
+
+```bash
+# Frontend (IIFE bundle)
+npm install
+npm run build
+# outputs: dist/nkz-module.js
+```
+
+### Backend Docker Image
+
+Build context matters: the backend Dockerfile expects files from `backend/` (e.g. `environment.yml`), so use `./backend` as context.
 
 ```bash
 # Backend (context = ./backend)
 docker build -f backend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest ./backend
-
-# Frontend (context = repo root)
-docker build -f frontend/Dockerfile -t ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest .
+docker push ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest
+sudo kubectl rollout restart deployment/lidar-api deployment/lidar-worker -n nekazari
+sudo kubectl rollout status deployment/lidar-api deployment/lidar-worker -n nekazari
 ```
 
-### Kubernetes Deployment
+### Frontend Deployment (Production)
+
+Upload the IIFE bundle to MinIO so it becomes available at:
+
+- `/modules/lidar/nkz-module.js`
+
+This must match `marketplace_modules.remote_entry_url` (see `k8s/registration.sql`).
+
+### Kubernetes Deployment (backend only)
+
 ```bash
-# Apply deployments (use -n nekazari if not default)
+# Apply backend deployments (use -n nekazari if not default)
 kubectl apply -f k8s/backend-deployment.yaml -n nekazari
-kubectl apply -f k8s/frontend-deployment.yaml -n nekazari
 
 # Register module in platform database
 psql -h <db-host> -U <user> -d nekazari -f k8s/registration.sql
@@ -92,8 +111,8 @@ sudo kubectl rollout status deployment/lidar-frontend deployment/lidar-api deplo
 
 This module integrates with the Nekazari Platform through:
 
-1. **Module Federation**: Remote module loaded dynamically by the host
-2. **Slot System**: Provides widgets for:
+1. **Runtime Script Injection (IIFE)**: the host injects `/modules/lidar/nkz-module.js`
+2. **Slot System**: provides widgets for:
    - `layer-toggle`: Layer control widget
    - `map-layer`: CesiumJS 3D Tiles layer
    - `context-panel`: Configuration panel

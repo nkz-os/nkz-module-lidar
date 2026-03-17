@@ -1,7 +1,13 @@
 # =============================================================================
-# LIDAR Module Frontend Deployment
+# LIDAR Module Frontend (DEPRECATED)
 # =============================================================================
-# Frontend service for LIDAR module
+# Nekazari no longer uses Module Federation. Frontend bundles are served from MinIO
+# and loaded via runtime script injection:
+#   /modules/<moduleId>/nkz-module.js
+#
+# This manifest is kept only as a legacy reference. It is intentionally scaled to 0
+# and does NOT expose /modules/lidar via Ingress (that path must be served by the
+# platform frontend-static proxy to MinIO).
 # =============================================================================
 
 ---
@@ -17,7 +23,7 @@ metadata:
     module: lidar
     nekazari.io/profile: addon
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: lidar-frontend
@@ -54,56 +60,3 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
-
----
-# Service: LIDAR Module Frontend
-apiVersion: v1
-kind: Service
-metadata:
-  name: lidar-frontend-service
-  namespace: nekazari
-  labels:
-    app: lidar-frontend
-    component: frontend
-    module: lidar
-spec:
-  selector:
-    app: lidar-frontend
-  ports:
-    - name: http
-      port: 80
-      targetPort: http
-  type: ClusterIP
-
----
-# Ingress: LIDAR Module Frontend Assets
-# Routes /modules/lidar/* to the lidar-frontend-service
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: lidar-module-ingress
-  namespace: nekazari
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.tls: "true"
-  labels:
-    app: lidar-frontend
-    module: lidar
-spec:
-  ingressClassName: traefik
-  tls:
-    - hosts:
-        - nekazari.robotika.cloud
-      secretName: nekazari-tls
-  rules:
-    - host: nekazari.robotika.cloud
-      http:
-        paths:
-          - path: /modules/lidar
-            pathType: Prefix
-            backend:
-              service:
-                name: lidar-frontend-service
-                port:
-                  number: 80
