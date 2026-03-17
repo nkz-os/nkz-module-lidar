@@ -1,5 +1,6 @@
 # Multi-stage build for LIDAR Module Frontend
-# Stage 1: Build with Vite + Module Federation
+# NOTE: In production, Nekazari serves module bundles from MinIO (IIFE runtime script injection).
+# This container is optional and mainly useful for local/testing deployments.
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -26,10 +27,10 @@ RUN npm run build
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
 
-# Copy built assets (includes remoteEntry.js)
+# Copy built assets (IIFE bundle: nkz-module.js)
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy custom nginx config for Module Federation
+# Copy custom nginx config
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Health endpoint

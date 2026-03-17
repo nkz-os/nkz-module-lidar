@@ -32,7 +32,7 @@ INSERT INTO marketplace_modules (
     'lidar',
     'LiDAR Point Cloud',
     'Visualize LiDAR point cloud data from PNOA in CesiumJS. Download LAZ files, detect trees, and convert to 3D Tiles for interactive visualization.',
-    '/modules/lidar/assets/remoteEntry.js',
+    '/modules/lidar/nkz-module.js',
     'lidar_module',
     './App',
     '1.0.0',
