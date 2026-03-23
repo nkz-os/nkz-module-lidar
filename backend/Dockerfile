@@ -3,6 +3,7 @@
 # Build from backend/ dir: docker build -t lidar-backend .
 
 FROM mambaorg/micromamba:1.5-jammy
+LABEL org.opencontainers.image.source=https://github.com/nkz-os/nkz-module-lidar
 
 # Set user for micromamba
 USER root
