@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -133,7 +133,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-backend:latest
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
           imagePullPolicy: Always
           # Use app.worker so logging.basicConfig runs and pipeline logs (download, Phase A/B/C/D) are visible
           command:

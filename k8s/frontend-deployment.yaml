@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ghcr.io/k8-benetis/nkz-module-lidar/lidar-frontend:latest
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-frontend:latest
           imagePullPolicy: Always
           ports:
             - name: http
