@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Public URL for serving tilesets (used by frontend)
     TILESET_PUBLIC_URL: str = "/api/lidar/tilesets"
+    MINIO_PUBLIC_BASE_URL: Optional[str] = None
     
     # Orion-LD Context Broker
     ORION_URL: str = "http://orion-ld:1026"
@@ -40,6 +41,8 @@ class Settings(BaseSettings):
     # Processing settings
     DEFAULT_TREE_MIN_HEIGHT: float = 2.0  # meters
     DEFAULT_TREE_SEARCH_RADIUS: float = 3.0  # meters
+    GEOBBOX_BUFFER_KM: float = 20.0
+    EUROPE_BOUNDS_GEOJSON_PATH: str = "/app/data/eu_uk_bounds.geojson"
     
     # Worker settings
     WORKER_QUEUE_NAME: str = "lidar-processing"
@@ -47,6 +50,7 @@ class Settings(BaseSettings):
 
     # Security
     CORS_ORIGINS: str = "http://localhost:3000"
+    PROJ_USER_WRITABLE_DIRECTORY: str = "/var/cache/proj"
     
     class Config:
         env_file = ".env"

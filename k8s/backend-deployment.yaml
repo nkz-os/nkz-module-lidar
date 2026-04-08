@@ -62,6 +62,8 @@ spec:
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
               value: "https://nkz.robotika.cloud/api/lidar/tilesets"
+            - name: MINIO_PUBLIC_BASE_URL
+              value: "https://minio.robotika.cloud"
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
@@ -87,6 +89,13 @@ spec:
               value: "/opt/conda/share/proj"
             - name: PROJ_LIB
               value: "/opt/conda/share/proj"
+            - name: PROJ_NETWORK
+              value: "ON"
+            - name: PROJ_USER_WRITABLE_DIRECTORY
+              value: "/var/cache/proj"
+          volumeMounts:
+            - name: proj-cache
+              mountPath: /var/cache/proj
           resources:
             requests:
               memory: "256Mi"
@@ -131,6 +140,10 @@ spec:
         component: worker
         module: lidar
     spec:
+      volumes:
+        - name: proj-cache
+          persistentVolumeClaim:
+            claimName: lidar-proj-cache-pvc
       containers:
         - name: worker
           image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:20260408-145806-orion2
@@ -169,6 +182,8 @@ spec:
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
               value: "https://nkz.robotika.cloud/api/lidar/tilesets"
+            - name: MINIO_PUBLIC_BASE_URL
+              value: "https://minio.robotika.cloud"
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
@@ -176,6 +191,9 @@ spec:
               value: "http://api-gateway-service:5000/ngsi-ld-context.json"
             - name: COVERAGE_INDEX_GEOJSON_PATH
               value: "/app/data/lidar_coverage.geojson"
+            # Same allowlist as API; worker applies MinIO bucket CORS via StorageService.
+            - name: CORS_ORIGINS
+              value: "https://nekazari.robotika.cloud,https://nkz.robotika.cloud"
             # Worker settings
             - name: WORKER_QUEUE_NAME
               value: "lidar-processing"
@@ -186,6 +204,13 @@ spec:
               value: "/opt/conda/share/proj"
             - name: PROJ_LIB
               value: "/opt/conda/share/proj"
+            - name: PROJ_NETWORK
+              value: "ON"
+            - name: PROJ_USER_WRITABLE_DIRECTORY
+              value: "/var/cache/proj"
+          volumeMounts:
+            - name: proj-cache
+              mountPath: /var/cache/proj
           resources:
             # Reduced for single-node cluster
             requests:
@@ -214,4 +239,17 @@ spec:
       port: 80
       targetPort: http
   type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lidar-proj-cache-pvc
+  namespace: nekazari
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
 

@@ -58,6 +58,8 @@
   "errorFileType": "Solo se permiten archivos .LAZ o .LAS",
   "errorFileSize": "El archivo es demasiado grande (max. 500MB)",
   "errorUpload": "Error al subir el archivo",
+  "errorMissingCrs": "Faltan metadatos CRS. Introduce el EPSG de origen antes de subir.",
+  "manualCrsLabel": "CRS de origen (obligatorio si el LAZ no incluye proyección)",
   "deleteLayer": "Eliminar capa",
   "deleteConfirm": "Seguro que quieres eliminar esta capa? Esta accion no se puede deshacer.",
   "deleting": "Eliminando...",

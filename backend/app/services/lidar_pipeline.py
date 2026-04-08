@@ -39,7 +39,10 @@ from skimage.segmentation import watershed
 import requests
 
 from app.config import settings
+from app.services.geobounds_validator import GeoBoundsValidator
+from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs, reproject_to_ecef
 from app.services.orion_client import get_orion_client
+from app.services.pnoa_indexer import PNOAIndexer
 from app.services.storage import storage_service
 from app.services.tile_cache import tile_cache
 
@@ -69,7 +72,13 @@ class LidarPipeline:
         self.cropped_laz: Optional[str] = None
         self.colored_laz: Optional[str] = None
         self.output_tiles_dir: Optional[str] = None
+        self.reprojected_laz: Optional[str] = None
         self.detected_trees: List[Dict[str, Any]] = []
+        self.source_crs: Optional[str] = None
+        self.bounds_validator = GeoBoundsValidator(
+            settings.EUROPE_BOUNDS_GEOJSON_PATH,
+            buffer_km=settings.GEOBBOX_BUFFER_KM,
+        )
         
         # Ensure work directory exists
         Path(self.work_dir).mkdir(parents=True, exist_ok=True)
@@ -116,7 +125,7 @@ class LidarPipeline:
             
             # Phase A: Download and Crop
             self.update_job_status("processing", 10, "Downloading and cropping point cloud...")
-            self.phase_a_ingest(laz_url, geometry_wkt)
+            self.phase_a_ingest(laz_url, geometry_wkt, config.get("source_crs"))
             
             # Phase B: Spectral Fusion (if NDVI source provided)
             ndvi_url = config.get("ndvi_source_url")
@@ -170,7 +179,7 @@ class LidarPipeline:
             # Cleanup work directory
             self._cleanup()
     
-    def phase_a_ingest(self, laz_url: str, geometry_wkt: str):
+    def phase_a_ingest(self, laz_url: str, geometry_wkt: str, source_crs_override: Optional[str] = None):
         """
         Phase A: Download, Crop, and Denoise the point cloud.
         
@@ -191,6 +200,8 @@ class LidarPipeline:
             # Local file - just copy (user uploads)
             self.input_laz = os.path.join(self.work_dir, "input.laz")
             shutil.copy(laz_url, self.input_laz)
+        validation = inspect_laz_crs(self.input_laz, source_crs_override=source_crs_override)
+        self.source_crs = validation.source_crs
         
         # Step 2: Build PDAL pipeline for crop + denoise
         self.cropped_laz = os.path.join(self.work_dir, "cropped.laz")
@@ -495,6 +506,15 @@ class LidarPipeline:
         logger.info("Phase D: 3D Tiling")
         
         source_laz = self.colored_laz or self.cropped_laz
+        self.reprojected_laz = os.path.join(self.work_dir, "reprojected_ecef.laz")
+        try:
+            reproject_to_ecef(source_laz, self.reprojected_laz, self.source_crs or "EPSG:4326")
+        except GeodesyValidationError:
+            raise
+        except Exception as exc:
+            raise GeodesyValidationError(f"CRS_OPERATION_UNRESOLVED:{exc}") from exc
+        self._validate_bbox_is_europe(self.reprojected_laz)
+        source_laz = self.reprojected_laz
         self.output_tiles_dir = os.path.join(self.work_dir, "tiles")
 
         # Verify the source file has points before conversion
@@ -549,7 +569,7 @@ class LidarPipeline:
     
     def _count_points(self) -> int:
         """Count points in the processed file."""
-        source = self.colored_laz or self.cropped_laz
+        source = self.reprojected_laz or self.colored_laz or self.cropped_laz
         if not source or not os.path.exists(source):
             return 0
         
@@ -558,6 +578,18 @@ class LidarPipeline:
         }))
         pipeline.execute()
         return pipeline.metadata.get('metadata', {}).get('readers.las', {}).get('count', 0)
+
+    def _validate_bbox_is_europe(self, laz_path: str):
+        with laspy.open(laz_path) as reader:
+            mins = reader.header.mins
+            maxs = reader.header.maxs
+        transformer = pyproj.Transformer.from_crs("EPSG:4978", "EPSG:4326", always_xy=True)
+        cx = (mins[0] + maxs[0]) / 2
+        cy = (mins[1] + maxs[1]) / 2
+        cz = (mins[2] + maxs[2]) / 2
+        lon, lat, _ = transformer.transform(cx, cy, cz)
+        if not self.bounds_validator.validate_lon_lat(lon, lat):
+            raise GeodesyValidationError("CRS_BBOX_OUTLIER")
     
     def _create_orion_entities(self, tileset_url: str, config: Dict[str, Any], result: Dict[str, Any]):
         """

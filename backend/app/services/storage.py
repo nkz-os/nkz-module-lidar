@@ -38,6 +38,7 @@ class StorageService:
         )
         self.bucket = settings.MINIO_BUCKET
         self._ensure_bucket()
+        self._sync_bucket_cors()
     
     def _ensure_bucket(self):
         """Ensure the bucket exists."""
@@ -73,6 +74,49 @@ class StorageService:
             Policy=json.dumps(policy)
         )
         logger.info(f"Set public read policy on bucket {self.bucket}")
+
+    def _sync_bucket_cors(self) -> None:
+        """
+        Apply strict browser CORS on the tileset bucket (no wildcard origins).
+        Uses the same allowlist as FastAPI (CORS_ORIGINS).
+        """
+        origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+        if not origins:
+            logger.warning("CORS_ORIGINS empty; skip MinIO CORS sync for bucket %s", self.bucket)
+            return
+        try:
+            self.client.put_bucket_cors(
+                Bucket=self.bucket,
+                CORSConfiguration={
+                    "CORSRules": [
+                        {
+                            "ID": "lidar-tilesets-browser",
+                            "AllowedMethods": ["GET", "HEAD", "OPTIONS"],
+                            "AllowedOrigins": origins,
+                            "AllowedHeaders": [
+                                "Range",
+                                "If-None-Match",
+                                "If-Modified-Since",
+                                "Accept",
+                                "Origin",
+                                "Access-Control-Request-Method",
+                                "Access-Control-Request-Headers",
+                            ],
+                            "ExposeHeaders": [
+                                "ETag",
+                                "Content-Length",
+                                "Content-Range",
+                                "Accept-Ranges",
+                                "Last-Modified",
+                            ],
+                            "MaxAgeSeconds": 3600,
+                        },
+                    ],
+                },
+            )
+            logger.info("MinIO bucket CORS applied for %s: %s", self.bucket, origins)
+        except ClientError as exc:
+            logger.warning("MinIO put_bucket_cors failed for %s: %s", self.bucket, exc)
     
     def upload_directory(
         self,
@@ -129,10 +173,8 @@ class StorageService:
                 uploaded_files.append(s3_key)
         
         logger.info(f"Uploaded {len(uploaded_files)} files to {prefix}")
-        
-        # Return URL to tileset.json
-        tileset_url = f"{settings.TILESET_PUBLIC_URL}/{prefix}/tileset.json"
-        return tileset_url
+        tileset_key = f"{prefix}/tileset.json".replace("\\", "/")
+        return self.get_public_url(tileset_key)
     
     def delete_prefix(self, prefix: str) -> int:
         """
@@ -164,6 +206,9 @@ class StorageService:
     
     def get_public_url(self, key: str) -> str:
         """Get the public URL for an object."""
+        if settings.MINIO_PUBLIC_BASE_URL:
+            base = settings.MINIO_PUBLIC_BASE_URL.rstrip("/")
+            return f"{base}/{self.bucket}/{key}"
         return f"{settings.TILESET_PUBLIC_URL}/{key}"
     
     def file_exists(self, key: str) -> bool:
@@ -240,7 +285,7 @@ class StorageService:
         else:
             raise ValueError("Either file_path or file_obj must be provided")
         
-        return f"{settings.TILESET_PUBLIC_URL}/{key}"
+        return self.get_public_url(key)
     
     def get_file_stream(self, key: str) -> "botocore.response.StreamingBody":
         """

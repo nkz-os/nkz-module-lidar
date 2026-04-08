@@ -58,6 +58,8 @@
   "errorFileType": "Only .LAZ and .LAS files are supported",
   "errorFileSize": "File too large (max 500MB)",
   "errorUpload": "Error uploading file",
+  "errorMissingCrs": "Missing CRS metadata. Enter source EPSG before upload.",
+  "manualCrsLabel": "Source CRS (required if LAZ has no projection metadata)",
   "deleteLayer": "Delete layer",
   "deleteConfirm": "Are you sure you want to delete this layer? This action cannot be undone.",
   "deleting": "Deleting...",

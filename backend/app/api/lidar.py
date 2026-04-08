@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
@@ -17,6 +17,7 @@ from rq import Queue
 from app.config import settings
 from app.middleware.auth import get_tenant_id, require_auth
 from app.services.lidar_pipeline import process_lidar_job, process_uploaded_file
+from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs
 from app.services.orion_client import get_orion_client
 from app.services.pnoa_indexer import PNOAIndexer
 
@@ -334,6 +335,7 @@ async def upload_laz_file(
     parcel_id: str = Form(..., description="Parcel entity ID"),
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
     config: str = Form(default="{}", description="Processing config as JSON string"),
+    source_crs: Optional[str] = Form(None, description="Optional source CRS override (e.g. EPSG:25830+5782)"),
     current_user: dict = Depends(require_auth),
     tenant_id: str = Depends(get_tenant_id)
 ):
@@ -388,9 +390,15 @@ async def upload_laz_file(
                 f.write(chunk)
         
         logger.info(f"Uploaded file saved to {temp_file_path} ({bytes_written} bytes)")
+        inspect_laz_crs(temp_file_path, source_crs_override=source_crs)
         
         job_id = str(uuid4())
-        config_payload = {**config_dict, "uploaded_file_path": temp_file_path, "source": "user_upload"}
+        config_payload = {
+            **config_dict,
+            "uploaded_file_path": temp_file_path,
+            "source": "user_upload",
+            "source_crs": source_crs,
+        }
         job_entity_id = get_orion_client(tenant_id).create_processing_job(
             job_id=job_id,
             parcel_id=parcel_id,
@@ -436,6 +444,12 @@ async def upload_laz_file(
             message="File uploaded and queued for processing. Poll /status/{job_id} for updates."
         )
         
+    except GeodesyValidationError as e:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         # Cleanup on error
         if os.path.exists(temp_file_path):
@@ -473,6 +487,9 @@ async def serve_tileset_file(file_path: str, request: Request):
     # Files are stored in MinIO under "{job_id}/tileset.json", "{job_id}/r.pnts", etc.
     # The route strips "/api/lidar/tilesets/" leaving "{job_id}/..."
     object_key = file_path
+    if settings.MINIO_PUBLIC_BASE_URL:
+        direct_url = f"{settings.MINIO_PUBLIC_BASE_URL.rstrip('/')}/{settings.MINIO_BUCKET}/{object_key}"
+        return RedirectResponse(url=direct_url, status_code=307)
 
     # Determine content type from extension
     ext = os.path.splitext(file_path)[1].lower()

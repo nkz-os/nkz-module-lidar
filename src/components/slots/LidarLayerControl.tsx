@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
+import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
@@ -54,6 +55,8 @@ const LidarLayerControl: React.FC = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [deletingLayerId, setDeletingLayerId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [manualCrs, setManualCrs] = useState('');
+  const [requiresManualCrs, setRequiresManualCrs] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -116,6 +119,18 @@ const LidarLayerControl: React.FC = () => {
     setErrorWithTimeout(null);
 
     try {
+      const parserWorker = new Worker(new URL('../../workers/lazHeaderWorker.ts', import.meta.url), { type: 'module' });
+      const headerInfo: LazHeaderParseResult = await new Promise((resolve) => {
+        parserWorker.onmessage = (ev) => resolve(ev.data as LazHeaderParseResult);
+        parserWorker.postMessage({ file });
+      });
+      parserWorker.terminate();
+
+      if (!headerInfo.hasProjectionVlr && !manualCrs.trim()) {
+        setRequiresManualCrs(true);
+        throw new Error(t('errorMissingCrs'));
+      }
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('parcel_id', selectedEntityId || 'unknown');
@@ -123,6 +138,9 @@ const LidarLayerControl: React.FC = () => {
         formData.append('geometry_wkt', selectedEntityGeometry);
       }
       formData.append('config', JSON.stringify(processingConfig));
+      if (manualCrs.trim()) {
+        formData.append('source_crs', manualCrs.trim());
+      }
 
       const authCtx = (window as any).__nekazariAuthContext;
       const headers: HeadersInit = {};
@@ -143,6 +161,8 @@ const LidarLayerControl: React.FC = () => {
       }
 
       await refreshLayers();
+      setRequiresManualCrs(false);
+      setManualCrs('');
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('errorUpload');
       setErrorWithTimeout(msg);
@@ -415,6 +435,17 @@ const LidarLayerControl: React.FC = () => {
             </div>
 
             {/* File Upload Dropzone */}
+            {requiresManualCrs && (
+              <div className="p-3 rounded-lg border border-amber-300 bg-amber-50">
+                <label className="text-xs text-amber-800 block mb-1">{t('manualCrsLabel')}</label>
+                <input
+                  value={manualCrs}
+                  onChange={(e) => setManualCrs(e.target.value)}
+                  placeholder="EPSG:25830+5782"
+                  className="w-full border border-amber-300 rounded px-2 py-1 text-sm"
+                />
+              </div>
+            )}
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
