@@ -10,8 +10,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
-    # Database (PostGIS)
+    # Legacy compatibility: keep attribute for modules that still import db package.
     DATABASE_URL: str = "postgresql://postgres:postgres@postgresql:5432/nekazari"
     
     # Redis (for RQ job queue)
@@ -19,8 +18,8 @@ class Settings(BaseSettings):
     
     # MinIO / S3 Storage
     MINIO_ENDPOINT: str = "minio:9000"
-    MINIO_ACCESS_KEY: str  # Required - no default
-    MINIO_SECRET_KEY: str  # Required - no default
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
     MINIO_BUCKET: str = "lidar-tilesets"
     MINIO_SECURE: bool = False
     
@@ -29,13 +28,14 @@ class Settings(BaseSettings):
     
     # Orion-LD Context Broker
     ORION_URL: str = "http://orion-ld:1026"
+    ORION_CONTEXT_URL: Optional[str] = None
     
     # Keycloak (for token validation)
     KEYCLOAK_URL: str = "http://keycloak:8080/auth"
     KEYCLOAK_REALM: str = "nekazari"
     
     # PNOA / CNIG data source
-    PNOA_SHAPEFILE_PATH: Optional[str] = None  # Path to local shapefile if downloaded
+    COVERAGE_INDEX_GEOJSON_PATH: str = "/app/data/lidar_coverage.geojson"
     
     # Processing settings
     DEFAULT_TREE_MIN_HEIGHT: float = 2.0  # meters
@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Worker settings
     WORKER_QUEUE_NAME: str = "lidar-processing"
     WORKER_TIMEOUT: int = 1800  # 30 minutes max per job
+
+    # Security
+    CORS_ORIGINS: str = "http://localhost:3000"
     
     class Config:
         env_file = ".env"

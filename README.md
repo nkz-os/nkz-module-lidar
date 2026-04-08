@@ -68,6 +68,22 @@ sudo kubectl rollout restart deployment/lidar-api deployment/lidar-worker -n nek
 sudo kubectl rollout status deployment/lidar-api deployment/lidar-worker -n nekazari
 ```
 
+### Recommended Production Flow (Option 2: Immutable image tags)
+
+Use immutable GHCR tags and commit the tag into `k8s/backend-deployment.yaml` so ArgoCD reconciles deterministically:
+
+1. Publish image with immutable tag:
+   - via GitHub Actions workflow `.github/workflows/backend-image-ghcr.yml` (manual dispatch with `image_tag`)
+   - or from CI on `main` (auto `sha-<short_sha>` tag)
+2. Pin manifest image by editing `k8s/backend-deployment.yaml`:
+   - replace `ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest`
+   - with `ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:<immutable_tag>`
+   - update both deployments (`lidar-api` and `lidar-worker`)
+3. Commit and push manifest change.
+4. ArgoCD sync applies the exact immutable image tag.
+
+This avoids silent drift from `:latest` and improves traceability/auditability.
+
 ### Frontend Deployment (Production)
 
 Upload the IIFE bundle to MinIO so it becomes available at:

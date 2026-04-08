@@ -13,11 +13,17 @@ This directory contains additional documentation and guides for developing Nekaz
 ## Testing
 
 - **[Testing Guide](./TESTING_GUIDE.md)** - How to test your module locally
-  - Local development setup
-  - API proxy configuration
-  - Mock data for development
-  - Testing checklist
-  - Common issues and solutions
+  - Orion-LD first workflow (no SQL runtime state)
+  - API + worker validation flow
+  - Test commands for backend and frontend
+  - Migration script usage
+
+## Architecture Notes (2026 refactor)
+
+- Runtime state (`jobs`, `layers`) is persisted in Orion-LD only.
+- PostgreSQL runtime writes were removed from API/worker flow.
+- Coverage lookup is loaded from a read-only GeoJSON catalog (`COVERAGE_INDEX_GEOJSON_PATH`).
+- Tiles are stored in MinIO and referenced in Orion-LD DigitalAsset entities.
 
 ## External Resources
 

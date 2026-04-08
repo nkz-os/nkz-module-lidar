@@ -31,18 +31,12 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:20260408-145806-orion2
           imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
           env:
-            # Database (use existing postgresql-secret)
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: postgresql-secret
-                  key: postgres-url
             # Redis (with password from secret)
             - name: REDIS_PASSWORD
               valueFrom:
@@ -71,6 +65,12 @@ spec:
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
+            - name: ORION_CONTEXT_URL
+              value: "http://api-gateway-service:5000/ngsi-ld-context.json"
+            - name: COVERAGE_INDEX_GEOJSON_PATH
+              value: "/app/data/lidar_coverage.geojson"
+            - name: CORS_ORIGINS
+              value: "https://nekazari.robotika.cloud"
             # Authentication (Keycloak)
             - name: KEYCLOAK_URL
               value: "https://auth.robotika.cloud/auth"
@@ -133,7 +133,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:20260408-145806-orion2
           imagePullPolicy: Always
           # Use app.worker so logging.basicConfig runs and pipeline logs (download, Phase A/B/C/D) are visible
           command:
@@ -144,11 +144,6 @@ spec:
             ]
           env:
             # Database
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: postgresql-secret
-                  key: postgres-url
             # Redis (with password from secret)
             - name: REDIS_PASSWORD
               valueFrom:
@@ -177,6 +172,10 @@ spec:
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
+            - name: ORION_CONTEXT_URL
+              value: "http://api-gateway-service:5000/ngsi-ld-context.json"
+            - name: COVERAGE_INDEX_GEOJSON_PATH
+              value: "/app/data/lidar_coverage.geojson"
             # Worker settings
             - name: WORKER_QUEUE_NAME
               value: "lidar-processing"

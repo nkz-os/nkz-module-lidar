@@ -25,6 +25,11 @@ security = HTTPBearer()
 
 def get_jwks_client() -> PyJWKClient:
     """Get or create JWKS client."""
+    if not JWT_ISSUER:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT_ISSUER is not configured"
+        )
     global _jwks_client
     if _jwks_client is None:
         _jwks_client = PyJWKClient(JWKS_URL)

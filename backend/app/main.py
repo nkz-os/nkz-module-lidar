@@ -3,13 +3,12 @@ FastAPI main application for LIDAR module.
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import lidar
-from app.db import init_db
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +23,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("Starting LIDAR Module API...")
-    
-    # Initialize database tables
-    try:
-        init_db()
-        logger.info("Database tables initialized")
-    except Exception as e:
-        logger.warning(f"Database initialization warning: {e}")
-    
     yield
-    
     logger.info("Shutting down LIDAR Module API...")
 
 
@@ -59,14 +49,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
-_cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:3000"
-)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins.split(",") if o.strip()],
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

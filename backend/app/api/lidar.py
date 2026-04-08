@@ -1,38 +1,29 @@
-"""
-LIDAR API endpoints.
+"""LIDAR API endpoints backed by Orion-LD entities."""
 
-Provides REST endpoints for:
-- Checking LiDAR coverage for a parcel
-- Starting processing jobs
-- Querying job status
-- Managing point cloud layers
-"""
-
+import json
 import logging
 import os
 import tempfile
-import json
-from typing import List, Optional
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+
+from botocore.exceptions import ClientError
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
-from sqlalchemy.orm import Session
 
-from fastapi.responses import StreamingResponse
-from botocore.exceptions import ClientError
-
-from app.middleware.auth import require_auth, get_tenant_id
-from app.db import get_db
 from app.config import settings
-from app.models import LidarProcessingJob, LidarCoverageIndex, PointCloudLayer, JobStatus
+from app.middleware.auth import get_tenant_id, require_auth
+from app.services.lidar_pipeline import process_lidar_job, process_uploaded_file
+from app.services.orion_client import get_orion_client
 from app.services.pnoa_indexer import PNOAIndexer
-from app.services.lidar_pipeline import process_lidar_job
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+ALLOWED_CORS_ORIGINS = {o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()}
 
 
 # ============================================================================
@@ -106,6 +97,10 @@ def get_redis_queue() -> Queue:
     return Queue(settings.WORKER_QUEUE_NAME, connection=redis_conn)
 
 
+def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
+    return entity.get(key, {}).get("value", default)
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -114,8 +109,7 @@ def get_redis_queue() -> Queue:
 async def start_processing(
     request: ProcessRequest,
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Start LiDAR processing for a parcel.
@@ -130,53 +124,46 @@ async def start_processing(
     logger.info(f"Processing request for parcel {request.parcel_id} by tenant {tenant_id}")
     
     # Check coverage first
-    indexer = PNOAIndexer(db)
+    indexer = PNOAIndexer()
     if not indexer.has_coverage(request.parcel_geometry_wkt):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No LiDAR coverage available for this parcel"
         )
     
-    # Create job record
-    job = LidarProcessingJob(
-        tenant_id=tenant_id,
-        user_id=current_user.get("sub", "unknown"),
+    job_id = str(uuid4())
+    job_entity_id = get_orion_client(tenant_id).create_processing_job(
+        job_id=job_id,
         parcel_id=request.parcel_id,
-        parcel_geometry_wkt=request.parcel_geometry_wkt,
+        geometry_wkt=request.parcel_geometry_wkt,
         config=request.config.model_dump(),
-        status=JobStatus.QUEUED
+        user_id=current_user.get("sub", "unknown"),
     )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
     
     # Enqueue job for worker
     try:
         queue = get_redis_queue()
         rq_job = queue.enqueue(
             process_lidar_job,
-            str(job.id),
+            job_entity_id,
+            tenant_id,
             job_timeout=settings.WORKER_TIMEOUT
         )
-        
-        # Store RQ job ID
-        job.rq_job_id = rq_job.id
-        db.commit()
-        
-        logger.info(f"Job {job.id} enqueued successfully (RQ: {rq_job.id})")
+        get_orion_client(tenant_id).update_job(job_entity_id, rqJobId=rq_job.id)
+        logger.info(f"Job {job_entity_id} enqueued successfully (RQ: {rq_job.id})")
         
     except Exception as e:
         logger.error(f"Failed to enqueue job: {e}")
-        job.status = JobStatus.FAILED
-        job.error_message = f"Failed to enqueue: {str(e)}"
-        db.commit()
+        get_orion_client(tenant_id).update_job(
+            job_entity_id, status="failed", errorMessage=f"Failed to enqueue: {str(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Processing queue unavailable. Please try again later."
         )
     
     return ProcessResponse(
-        job_id=str(job.id),
+        job_id=job_id,
         status="queued",
         message="Processing job queued. Poll /status/{job_id} for updates."
     )
@@ -186,51 +173,42 @@ async def start_processing(
 async def get_job_status(
     job_id: str,
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Get status of a processing job.
     
     Poll this endpoint to track job progress.
     """
+    entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
     try:
-        job_uuid = UUID(job_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid job ID format")
-    
-    job = db.query(LidarProcessingJob).filter(
-        LidarProcessingJob.id == job_uuid,
-        LidarProcessingJob.tenant_id == tenant_id
-    ).first()
-    
-    if not job:
+        job = get_orion_client(tenant_id).get_job(entity_id)
+    except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     return JobStatusResponse(
-        job_id=str(job.id),
-        status=job.status.value,
-        progress=job.progress or 0,
-        status_message=job.status_message,
-        error_message=job.error_message,
-        tileset_url=job.tileset_url,
-        tree_count=job.tree_count,
-        point_count=job.point_count
+        job_id=job_id,
+        status=_prop(job, "status", "queued"),
+        progress=_prop(job, "progress", 0),
+        status_message=_prop(job, "statusMessage"),
+        error_message=_prop(job, "errorMessage"),
+        tileset_url=_prop(job, "tilesetUrl"),
+        tree_count=_prop(job, "treeCount"),
+        point_count=_prop(job, "pointCount")
     )
 
 
 @router.post("/coverage", response_model=CoverageResponse)
 async def check_coverage(
     request: CoverageCheckRequest,
-    current_user: dict = Depends(require_auth),
-    db: Session = Depends(get_db)
+    current_user: dict = Depends(require_auth)
 ):
     """
     Check if LiDAR coverage is available for a given area.
     
     Returns list of available tiles with their metadata.
     """
-    indexer = PNOAIndexer(db)
+    indexer = PNOAIndexer()
     tiles = indexer.find_coverage(request.geometry_wkt, source=request.source)
     
     return CoverageResponse(
@@ -243,31 +221,22 @@ async def check_coverage(
 async def get_layers(
     parcel_id: Optional[str] = Query(None, description="Filter by parcel ID"),
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Get available point cloud layers for the tenant.
     """
-    query = db.query(PointCloudLayer).filter(
-        PointCloudLayer.tenant_id == tenant_id
-    )
-    
-    if parcel_id:
-        query = query.filter(PointCloudLayer.parcel_id == parcel_id)
-    
-    layers = query.all()
-    
+    layers = get_orion_client(tenant_id).list_assets(parcel_id=parcel_id)
     return [
         LayerResponse(
-            id=str(layer.id),
-            parcel_id=layer.parcel_id,
-            tileset_url=layer.tileset_url,
-            source=layer.source,
-            point_count=layer.point_count,
-            date_observed=layer.date_observed.isoformat() if layer.date_observed else None
+            id=l.get("id", "").split(":")[-1],
+            parcel_id=l.get("refAgriParcel", {}).get("object", ""),
+            tileset_url=_prop(l, "resourceURL", ""),
+            source=_prop(l, "source", "PNOA"),
+            point_count=_prop(l, "pointCount"),
+            date_observed=_prop(l, "dateObserved"),
         )
-        for layer in layers
+        for l in layers
     ]
 
 
@@ -275,32 +244,24 @@ async def get_layers(
 async def get_layer(
     layer_id: str,
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Get details of a specific point cloud layer.
     """
+    entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        layer_uuid = UUID(layer_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid layer ID format")
-    
-    layer = db.query(PointCloudLayer).filter(
-        PointCloudLayer.id == layer_uuid,
-        PointCloudLayer.tenant_id == tenant_id
-    ).first()
-    
-    if not layer:
+        layer = get_orion_client(tenant_id).get_asset(entity_id)
+    except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
-    
+
     return LayerResponse(
-        id=str(layer.id),
-        parcel_id=layer.parcel_id,
-        tileset_url=layer.tileset_url,
-        source=layer.source,
-        point_count=layer.point_count,
-        date_observed=layer.date_observed.isoformat() if layer.date_observed else None
+        id=layer_id,
+        parcel_id=layer.get("refAgriParcel", {}).get("object", ""),
+        tileset_url=_prop(layer, "resourceURL", ""),
+        source=_prop(layer, "source", "PNOA"),
+        point_count=_prop(layer, "pointCount"),
+        date_observed=_prop(layer, "dateObserved"),
     )
 
 
@@ -308,36 +269,24 @@ async def get_layer(
 async def delete_layer(
     layer_id: str,
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Delete a point cloud layer.
     
     This also removes the tileset from storage.
     """
+    entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        layer_uuid = UUID(layer_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid layer ID format")
-    
-    layer = db.query(PointCloudLayer).filter(
-        PointCloudLayer.id == layer_uuid,
-        PointCloudLayer.tenant_id == tenant_id
-    ).first()
-    
-    if not layer:
+        get_orion_client(tenant_id).get_asset(entity_id)
+    except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
-    
-    # Delete from storage
+
     from app.services.storage import storage_service
-    prefix = str(layer.id)
+    prefix = layer_id
     storage_service.delete_prefix(prefix)
-    
-    # Delete database record
-    db.delete(layer)
-    db.commit()
-    
+    get_orion_client(tenant_id).delete_asset(entity_id)
+
     logger.info(f"Deleted layer {layer_id} for tenant {tenant_id}")
     
     return {"status": "deleted", "layer_id": layer_id}
@@ -350,43 +299,30 @@ async def list_jobs(
     limit: int = Query(20, le=100),
     offset: int = Query(0),
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     List processing jobs for the tenant.
     """
-    query = db.query(LidarProcessingJob).filter(
-        LidarProcessingJob.tenant_id == tenant_id
-    )
-    
+    jobs = get_orion_client(tenant_id).list_jobs(limit=limit, offset=offset)
     if status_filter:
-        try:
-            status_enum = JobStatus(status_filter)
-            query = query.filter(LidarProcessingJob.status == status_enum)
-        except ValueError:
-            pass
-    
+        jobs = [j for j in jobs if _prop(j, "status") == status_filter]
     if parcel_id:
-        query = query.filter(LidarProcessingJob.parcel_id == parcel_id)
-    
-    query = query.order_by(LidarProcessingJob.created_at.desc())
-    total = query.count()
-    jobs = query.offset(offset).limit(limit).all()
+        jobs = [j for j in jobs if j.get("refAgriParcel", {}).get("object", "").endswith(parcel_id)]
     
     return {
         "jobs": [
             {
-                "id": str(job.id),
-                "parcel_id": job.parcel_id,
-                "status": job.status.value,
-                "progress": job.progress or 0,
-                "created_at": job.created_at.isoformat(),
-                "completed_at": job.completed_at.isoformat() if job.completed_at else None
+                "id": job.get("id", "").split(":")[-1],
+                "parcel_id": job.get("refAgriParcel", {}).get("object", ""),
+                "status": _prop(job, "status", "queued"),
+                "progress": _prop(job, "progress", 0),
+                "created_at": _prop(job, "createdAt", ""),
+                "completed_at": _prop(job, "completedAt")
             }
             for job in jobs
         ],
-        "total": total,
+        "total": len(jobs),
         "limit": limit,
         "offset": offset
     }
@@ -399,8 +335,7 @@ async def upload_laz_file(
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
     config: str = Form(default="{}", description="Processing config as JSON string"),
     current_user: dict = Depends(require_auth),
-    tenant_id: str = Depends(get_tenant_id),
-    db: Session = Depends(get_db)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Upload a custom LAZ/LAS file for processing.
@@ -454,47 +389,35 @@ async def upload_laz_file(
         
         logger.info(f"Uploaded file saved to {temp_file_path} ({bytes_written} bytes)")
         
-        # Create job record
-        job = LidarProcessingJob(
-            tenant_id=tenant_id,
-            user_id=current_user.get("sub", "unknown"),
+        job_id = str(uuid4())
+        config_payload = {**config_dict, "uploaded_file_path": temp_file_path, "source": "user_upload"}
+        job_entity_id = get_orion_client(tenant_id).create_processing_job(
+            job_id=job_id,
             parcel_id=parcel_id,
-            parcel_geometry_wkt=geometry_wkt,
-            config={
-                **config_dict,
-                "uploaded_file_path": temp_file_path,
-                "source": "user_upload"
-            },
-            status=JobStatus.QUEUED
+            geometry_wkt=geometry_wkt,
+            config=config_payload,
+            user_id=current_user.get("sub", "unknown"),
         )
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-        
-        # Import the upload-specific worker function
-        from app.services.lidar_pipeline import process_uploaded_file
         
         # Enqueue job for worker
         try:
             queue = get_redis_queue()
             rq_job = queue.enqueue(
                 process_uploaded_file,
-                str(job.id),
+                job_entity_id,
+                tenant_id,
                 temp_file_path,
                 geometry_wkt,
                 job_timeout=settings.WORKER_TIMEOUT
             )
-            
-            job.rq_job_id = rq_job.id
-            db.commit()
-            
-            logger.info(f"Upload job {job.id} enqueued (RQ: {rq_job.id})")
+            get_orion_client(tenant_id).update_job(job_entity_id, rqJobId=rq_job.id)
+            logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
             
         except Exception as e:
             logger.error(f"Failed to enqueue upload job: {e}")
-            job.status = JobStatus.FAILED
-            job.error_message = f"Failed to enqueue: {str(e)}"
-            db.commit()
+            get_orion_client(tenant_id).update_job(
+                job_entity_id, status="failed", errorMessage=f"Failed to enqueue: {str(e)}"
+            )
             
             # Cleanup temp file
             if os.path.exists(temp_file_path):
@@ -508,7 +431,7 @@ async def upload_laz_file(
             )
         
         return ProcessResponse(
-            job_id=str(job.id),
+            job_id=job_id,
             status="queued",
             message="File uploaded and queued for processing. Poll /status/{job_id} for updates."
         )
@@ -538,7 +461,7 @@ TILESET_CONTENT_TYPES = {
 
 
 @router.get("/tilesets/{file_path:path}")
-async def serve_tileset_file(file_path: str):
+async def serve_tileset_file(file_path: str, request: Request):
     """
     Proxy endpoint that streams tileset files from MinIO.
 
@@ -564,11 +487,13 @@ async def serve_tileset_file(file_path: str):
         logger.error(f"MinIO error serving {object_key}: {e}")
         raise HTTPException(status_code=502, detail="Storage error")
 
+    origin = request.headers.get("origin", "")
+    cors_origin = origin if origin in ALLOWED_CORS_ORIGINS else ""
     return StreamingResponse(
         body.iter_chunks(chunk_size=65536),
         media_type=content_type,
         headers={
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": cors_origin,
             "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
             "Cache-Control": "public, max-age=3600",

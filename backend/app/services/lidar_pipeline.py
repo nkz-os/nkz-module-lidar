@@ -39,10 +39,9 @@ from skimage.segmentation import watershed
 import requests
 
 from app.config import settings
+from app.services.orion_client import get_orion_client
 from app.services.storage import storage_service
 from app.services.tile_cache import tile_cache
-from app.db import SessionLocal
-from app.models import LidarProcessingJob, LidarCoverageIndex, JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ class LidarPipeline:
     Orchestrates the 4-phase processing workflow for point cloud data.
     """
     
-    def __init__(self, job_id: str, work_dir: Optional[str] = None):
+    def __init__(self, job_id: str, tenant_id: str, parcel_id: str, work_dir: Optional[str] = None):
         """
         Initialize the pipeline.
         
@@ -63,6 +62,8 @@ class LidarPipeline:
             work_dir: Optional working directory (temp dir created if not provided)
         """
         self.job_id = job_id
+        self.tenant_id = tenant_id
+        self.parcel_id = parcel_id
         self.work_dir = work_dir or tempfile.mkdtemp(prefix="lidar_")
         self.input_laz: Optional[str] = None
         self.cropped_laz: Optional[str] = None
@@ -75,31 +76,22 @@ class LidarPipeline:
     
     def update_job_status(
         self,
-        status: JobStatus,
+        status: str,
         progress: int = 0,
         message: str = "",
         error: Optional[str] = None
     ):
-        """Update job status in database."""
-        db = SessionLocal()
-        try:
-            job = db.query(LidarProcessingJob).filter(
-                LidarProcessingJob.id == self.job_id
-            ).first()
-            
-            if job:
-                job.status = status
-                job.progress = progress
-                job.status_message = message
-                if error:
-                    job.error_message = error
-                if status == JobStatus.PROCESSING and not job.started_at:
-                    job.started_at = datetime.utcnow()
-                if status in (JobStatus.COMPLETED, JobStatus.FAILED):
-                    job.completed_at = datetime.utcnow()
-                db.commit()
-        finally:
-            db.close()
+        """Update job status in Orion-LD."""
+        updates: Dict[str, Any] = {
+            "status": status,
+            "progress": progress,
+            "statusMessage": message,
+        }
+        if error:
+            updates["errorMessage"] = error
+        if status in ("completed", "failed"):
+            updates["completedAt"] = datetime.utcnow().isoformat() + "Z"
+        get_orion_client(self.tenant_id).update_job(self.job_id, **updates)
     
     def process(
         self,
@@ -120,10 +112,10 @@ class LidarPipeline:
         """
         try:
             logger.info(f"Starting pipeline for job {self.job_id}")
-            self.update_job_status(JobStatus.PROCESSING, 0, "Starting pipeline...")
+            self.update_job_status("processing", 0, "Starting pipeline...")
             
             # Phase A: Download and Crop
-            self.update_job_status(JobStatus.PROCESSING, 10, "Downloading and cropping point cloud...")
+            self.update_job_status("processing", 10, "Downloading and cropping point cloud...")
             self.phase_a_ingest(laz_url, geometry_wkt)
             
             # Phase B: Spectral Fusion (if NDVI source provided)
@@ -131,32 +123,31 @@ class LidarPipeline:
             colorize_by = config.get("colorize_by", "height")
             
             if colorize_by == "ndvi" and ndvi_url:
-                self.update_job_status(JobStatus.PROCESSING, 30, "Applying NDVI colorization...")
+                self.update_job_status("processing", 30, "Applying NDVI colorization...")
                 self.phase_b_spectral_fusion(ndvi_url)
             else:
                 # Just copy cropped to colored path
                 self.colored_laz = self.cropped_laz
-                self.update_job_status(JobStatus.PROCESSING, 30, "Skipping spectral fusion (no NDVI source)")
+                self.update_job_status("processing", 30, "Skipping spectral fusion (no NDVI source)")
             
             # Phase C: Tree Segmentation (if enabled)
             detect_trees = config.get("detect_trees", False)
             if detect_trees:
-                self.update_job_status(JobStatus.PROCESSING, 50, "Detecting individual trees...")
+                self.update_job_status("processing", 50, "Detecting individual trees...")
                 min_height = config.get("tree_min_height", settings.DEFAULT_TREE_MIN_HEIGHT)
                 search_radius = config.get("tree_search_radius", settings.DEFAULT_TREE_SEARCH_RADIUS)
                 self.phase_c_tree_segmentation(min_height, search_radius)
             
             # Phase D: 3D Tiling
-            self.update_job_status(JobStatus.PROCESSING, 70, "Converting to 3D Tiles...")
+            self.update_job_status("processing", 70, "Converting to 3D Tiles...")
             self.phase_d_tiling()
             
             # Upload results to MinIO
-            self.update_job_status(JobStatus.PROCESSING, 90, "Uploading results...")
+            self.update_job_status("processing", 90, "Uploading results...")
             tileset_url = self._upload_results()
             
             # Create Orion-LD entities
-            self.update_job_status(JobStatus.PROCESSING, 95, "Creating digital twin entities...")
-            self._create_orion_entities(tileset_url, config)
+            self.update_job_status("processing", 95, "Creating digital twin entities...")
             
             # Update job with results
             result = {
@@ -166,14 +157,14 @@ class LidarPipeline:
                 "point_count": self._count_points()
             }
             
-            self._finalize_job(result)
-            self.update_job_status(JobStatus.COMPLETED, 100, "Processing complete!")
+            self._create_orion_entities(tileset_url, config, result)
+            self.update_job_status("completed", 100, "Processing complete!")
             
             return result
             
         except Exception as e:
             logger.exception(f"Pipeline failed for job {self.job_id}")
-            self.update_job_status(JobStatus.FAILED, 0, "Pipeline failed", str(e))
+            self.update_job_status("failed", 0, "Pipeline failed", str(e))
             raise
         finally:
             # Cleanup work directory
@@ -568,23 +559,7 @@ class LidarPipeline:
         pipeline.execute()
         return pipeline.metadata.get('metadata', {}).get('readers.las', {}).get('count', 0)
     
-    def _finalize_job(self, result: Dict[str, Any]):
-        """Update job record with final results."""
-        db = SessionLocal()
-        try:
-            job = db.query(LidarProcessingJob).filter(
-                LidarProcessingJob.id == self.job_id
-            ).first()
-            
-            if job:
-                job.tileset_url = result.get("tileset_url")
-                job.tree_count = result.get("tree_count", 0)
-                job.point_count = result.get("point_count", 0)
-                db.commit()
-        finally:
-            db.close()
-    
-    def _create_orion_entities(self, tileset_url: str, config: Dict[str, Any]):
+    def _create_orion_entities(self, tileset_url: str, config: Dict[str, Any], result: Dict[str, Any]):
         """
         Create Orion-LD entities for the processed data.
         
@@ -592,106 +567,22 @@ class LidarPipeline:
         - PointCloudLayer entity for the tileset
         - AgriTree entities for detected trees (if any)
         """
-        import httpx
-        
-        db = SessionLocal()
-        try:
-            job = db.query(LidarProcessingJob).filter(
-                LidarProcessingJob.id == self.job_id
-            ).first()
-            
-            if not job:
-                logger.warning("Job not found for Orion entity creation")
-                return
-            
-            tenant_id = job.tenant_id
-            parcel_id = job.parcel_id
-            
-            headers = {
-                "Content-Type": "application/ld+json",
-                "Accept": "application/ld+json",
-                "NGSILD-Tenant": tenant_id
-            }
-            
-            context = [
-                "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld"
-            ]
-            
-            # Create PointCloudLayer entity
-            layer_entity = {
-                "@context": context,
-                "id": f"urn:ngsi-ld:PointCloudLayer:{self.job_id}",
-                "type": "PointCloudLayer",
-                "refAgriParcel": {
-                    "type": "Relationship",
-                    "object": parcel_id if parcel_id.startswith("urn:") else f"urn:ngsi-ld:AgriParcel:{parcel_id}"
-                },
-                "tilesetUrl": {"type": "Property", "value": tileset_url},
-                "source": {"type": "Property", "value": config.get("source", "PNOA")},
-                "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
-                "pipelineStatus": {"type": "Property", "value": "COMPLETED"},
-                "treeCount": {"type": "Property", "value": len(self.detected_trees)}
-            }
-            
-            try:
-                with httpx.Client(timeout=30.0) as client:
-                    response = client.post(
-                        f"{settings.ORION_URL}/ngsi-ld/v1/entities",
-                        json=layer_entity,
-                        headers=headers
-                    )
-                    if response.status_code in (201, 204):
-                        logger.info(f"Created PointCloudLayer entity: {layer_entity['id']}")
-                    else:
-                        logger.warning(f"Failed to create PointCloudLayer: {response.status_code}")
-            except Exception as e:
-                logger.warning(f"Orion-LD PointCloudLayer creation failed: {e}")
-            
-            # Create AgriTree entities for detected trees
-            if self.detected_trees and config.get("detect_trees", False):
-                trees_created = 0
-                for tree in self.detected_trees[:100]:  # Limit to 100 trees per batch
-                    tree_entity = {
-                        "@context": context,
-                        "id": f"urn:ngsi-ld:AgriTree:{self.job_id}_{tree['id']}",
-                        "type": "AgriTree",
-                        "refAgriParcel": {
-                            "type": "Relationship",
-                            "object": parcel_id if parcel_id.startswith("urn:") else f"urn:ngsi-ld:AgriParcel:{parcel_id}"
-                        },
-                        "location": {"type": "GeoProperty", "value": tree["location"]},
-                        "height": {"type": "Property", "value": tree["height"], "unitCode": "MTR"},
-                        "crownDiameter": {"type": "Property", "value": tree.get("crown_diameter", 0), "unitCode": "MTR"},
-                        "crownArea": {"type": "Property", "value": tree.get("crown_area", 0), "unitCode": "MTK"},
-                        "source": {"type": "Property", "value": config.get("source", "LIDAR_PNOA")},
-                        "dateDetected": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"}
-                    }
-
-                    # Add canopy geometry if available (required for zonal stats)
-                    if "canopy_geometry" in tree and tree["canopy_geometry"]:
-                        tree_entity["canopyGeometry"] = {
-                            "type": "GeoProperty",
-                            "value": tree["canopy_geometry"]
-                        }
-
-                    try:
-                        with httpx.Client(timeout=10.0) as client:
-                            response = client.post(
-                                f"{settings.ORION_URL}/ngsi-ld/v1/entities",
-                                json=tree_entity,
-                                headers=headers
-                            )
-                            if response.status_code in (201, 204):
-                                trees_created += 1
-                            else:
-                                logger.debug(f"Tree entity creation: {response.status_code}")
-                    except Exception as e:
-                        logger.debug(f"Tree entity creation failed: {e}")
-
-                logger.info(f"Created {trees_created} AgriTree entities with canopy polygons")
-            
-        finally:
-            db.close()
+        client = get_orion_client(self.tenant_id)
+        asset_id = self.job_id.split(":")[-1]
+        client.create_digital_asset(
+            asset_id=asset_id,
+            parcel_id=self.parcel_id,
+            tileset_url=tileset_url,
+            source=config.get("source", "PNOA"),
+            point_count=result.get("point_count", 0),
+            tree_count=result.get("tree_count", 0),
+        )
+        client.update_job(
+            self.job_id,
+            tilesetUrl=tileset_url,
+            treeCount=result.get("tree_count", 0),
+            pointCount=result.get("point_count", 0),
+        )
     
     def _cleanup(self):
         """Clean up temporary working directory."""
@@ -772,7 +663,7 @@ class LidarPipeline:
             return geometry_wkt
 
 
-def process_lidar_job(job_id: str):
+def process_lidar_job(job_entity_id: str, tenant_id: str):
     """
     RQ task entry point for processing a LiDAR job.
     
@@ -781,40 +672,24 @@ def process_lidar_job(job_id: str):
     Args:
         job_id: UUID of the LidarProcessingJob to process
     """
-    logger.info(f"Worker starting job: {job_id}")
-    
-    # Load job from database
-    db = SessionLocal()
-    try:
-        job = db.query(LidarProcessingJob).filter(
-            LidarProcessingJob.id == job_id
-        ).first()
-        
-        if not job:
-            raise ValueError(f"Job not found: {job_id}")
-        
-        # Get LAZ URL from PNOA index
-        from app.services.pnoa_indexer import PNOAIndexer
-        indexer = PNOAIndexer(db)
-        
-        tile = indexer.get_best_tile(job.parcel_geometry_wkt)
-        if not tile:
-            raise ValueError("No LiDAR coverage found for parcel")
-        
-        laz_url = tile["laz_url"]
-        config = job.config or {}
-        
-    finally:
-        db.close()
-    
-    # Run the pipeline
-    pipeline = LidarPipeline(job_id)
-    result = pipeline.process(laz_url, job.parcel_geometry_wkt, config)
-    
+    logger.info("Worker starting job: %s", job_entity_id)
+    client = get_orion_client(tenant_id)
+    job = client.get_job(job_entity_id)
+    parcel_urn = job.get("refAgriParcel", {}).get("object", "")
+    parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
+    geometry_wkt = job.get("parcelGeometryWKT", {}).get("value", "")
+    config = job.get("config", {}).get("value", {}) or {}
+    indexer = PNOAIndexer()
+    tile = indexer.get_best_tile(geometry_wkt)
+    if not tile:
+        raise ValueError("No LiDAR coverage found for parcel")
+    laz_url = tile["laz_url"]
+    pipeline = LidarPipeline(job_entity_id, tenant_id=tenant_id, parcel_id=parcel_id)
+    result = pipeline.process(laz_url, geometry_wkt, config)
     return result
 
 
-def process_uploaded_file(job_id: str, file_path: str, geometry_wkt: Optional[str] = None):
+def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, geometry_wkt: Optional[str] = None):
     """
     RQ task entry point for processing an uploaded LiDAR file.
     
@@ -825,25 +700,13 @@ def process_uploaded_file(job_id: str, file_path: str, geometry_wkt: Optional[st
         file_path: Path to the uploaded LAZ/LAS file
         geometry_wkt: Optional WKT for cropping (if None, use entire file)
     """
-    logger.info(f"Worker starting upload job: {job_id} (file: {file_path})")
-    
-    # Load job from database
-    db = SessionLocal()
-    try:
-        job = db.query(LidarProcessingJob).filter(
-            LidarProcessingJob.id == job_id
-        ).first()
-        
-        if not job:
-            raise ValueError(f"Job not found: {job_id}")
-        
-        config = job.config or {}
-        
-    finally:
-        db.close()
-    
-    # Run the pipeline with the uploaded file
-    pipeline = LidarPipeline(job_id)
+    logger.info("Worker starting upload job: %s (file: %s)", job_entity_id, file_path)
+    client = get_orion_client(tenant_id)
+    job = client.get_job(job_entity_id)
+    parcel_urn = job.get("refAgriParcel", {}).get("object", "")
+    parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
+    config = job.get("config", {}).get("value", {}) or {}
+    pipeline = LidarPipeline(job_entity_id, tenant_id=tenant_id, parcel_id=parcel_id)
     
     # If no geometry provided, skip cropping
     if not geometry_wkt:

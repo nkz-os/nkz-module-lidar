@@ -1,6 +1,45 @@
-# Testing Guide for Nekazari Modules
+# Testing Guide for LiDAR Module
 
-Guide for testing your module locally before uploading to the platform.
+Guide for validating `nkz-module-lidar` after the Orion-LD refactor.
+
+## Backend Validation
+
+Run from `backend/`:
+
+```bash
+python3 -m py_compile app/main.py app/api/lidar.py app/services/orion_client.py app/services/pnoa_indexer.py app/services/tile_cache.py app/services/lidar_pipeline.py
+python3 -m pytest -q
+```
+
+Notes:
+- Tests require geospatial dependencies available in the runtime image (Conda stack with `shapely`, `rasterio`, `pdal`).
+- Required env vars for integration tests: `ORION_URL`, `REDIS_URL`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`.
+
+## Frontend Validation
+
+Run from module root:
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## End-to-End Smoke Flow
+
+1. Authenticate in host platform and select an `AgriParcel`.
+2. Call `POST /api/lidar/process` with `parcel_id`, `parcel_geometry_wkt`, `config`.
+3. Poll `GET /api/lidar/status/{job_id}` until `completed`.
+4. Verify DigitalAsset exists in Orion-LD and `resourceURL` points to tileset endpoint.
+5. Open map layer slot and confirm Cesium loads the tileset.
+
+## Legacy Migration
+
+Use script:
+
+```bash
+python3 backend/scripts/migrate_legacy_to_orion.py --input ./legacy-export.json --tenant <tenant_id> --dry-run
+python3 backend/scripts/migrate_legacy_to_orion.py --input ./legacy-export.json --tenant <tenant_id>
+```
 
 ## Local Development Setup
 
