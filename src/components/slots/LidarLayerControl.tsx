@@ -34,6 +34,7 @@ const LidarLayerControl: React.FC = () => {
   const {
     selectedEntityId,
     selectedEntityGeometry,
+    isLoadingMetadata,
     activeTilesetUrl,
     colorMode,
     setColorMode,
@@ -82,7 +83,7 @@ const LidarLayerControl: React.FC = () => {
     };
   }, []);
 
-  // Check coverage when entity is selected
+  // Check coverage when entity is selected AND geometry is available
   useEffect(() => {
     if (selectedEntityGeometry && hasCoverage === null) {
       checkCoverage();
@@ -94,6 +95,10 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   const handleStartProcessing = async () => {
+    if (!selectedEntityGeometry) {
+      setErrorWithTimeout(t('errorNoGeometry', 'Entity geometry is required for PNOA download.'));
+      return;
+    }
     try {
       setErrorWithTimeout(null);
       await startProcessing();
@@ -119,10 +124,14 @@ const LidarLayerControl: React.FC = () => {
     setErrorWithTimeout(null);
 
     try {
+      // Lazy load worker or handle potential failure
       const parserWorker = new Worker(new URL('../../workers/lazHeaderWorker.ts', import.meta.url), { type: 'module' });
-      const headerInfo: LazHeaderParseResult = await new Promise((resolve) => {
+      const headerInfo: LazHeaderParseResult = await new Promise((resolve, reject) => {
         parserWorker.onmessage = (ev) => resolve(ev.data as LazHeaderParseResult);
+        parserWorker.onerror = (err) => reject(err);
         parserWorker.postMessage({ file });
+        // Fail-safe timeout for worker
+        setTimeout(() => reject(new Error('Worker timeout')), 5000);
       });
       parserWorker.terminate();
 
@@ -142,23 +151,7 @@ const LidarLayerControl: React.FC = () => {
         formData.append('source_crs', manualCrs.trim());
       }
 
-      const authCtx = (window as any).__nekazariAuthContext;
-      const headers: HeadersInit = {};
-      if (authCtx?.tenantId) {
-        headers['X-Tenant-ID'] = authCtx.tenantId;
-      }
-
-      const response = await fetch('/api/lidar/upload', {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || t('errorUpload'));
-      }
+      await lidarApi.uploadFile(formData);
 
       await refreshLayers();
       setRequiresManualCrs(false);
@@ -209,16 +202,21 @@ const LidarLayerControl: React.FC = () => {
   };
 
   // =========================================================================
-  // Render: No entity selected
+  // Render: Main Control Panel
   // =========================================================================
 
   if (!selectedEntityId) {
     return null;
   }
 
-  // =========================================================================
-  // Render: Main Control Panel
-  // =========================================================================
+  if (isLoadingMetadata) {
+    return (
+      <div className="lidar-module p-4 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 flex flex-col items-center justify-center gap-3 min-h-[200px]">
+        <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+        <p className="text-sm text-slate-500 font-medium">{t('loadingMetadata', 'Loading entity details...')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="lidar-module" style={{ marginBottom: '12px' }}>

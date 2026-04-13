@@ -229,6 +229,35 @@ class LidarApiClient {
         });
     }
 
+    /**
+     * Upload a LiDAR file (.LAZ/.LAS)
+     */
+    async uploadFile(formData: FormData): Promise<ProcessResponse> {
+        // For file uploads, we must NOT set Content-Type to application/json
+        // Fetch will automatically set it to multipart/form-data with the correct boundary
+        
+        const authCtx = (window as any).__nekazariAuthContext;
+        const tenantId = authCtx?.tenantId;
+        const headers: Record<string, string> = {};
+        if (tenantId) {
+            headers['X-Tenant-ID'] = tenantId;
+        }
+
+        const response = await fetch(`${this.baseUrl}/upload`, {
+            method: 'POST',
+            headers,
+            credentials: 'include',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `Upload error: ${response.status}`);
+        }
+
+        return response.json();
+    }
+
     // --------------------------------------------------------------------------
     // Jobs List
     // --------------------------------------------------------------------------

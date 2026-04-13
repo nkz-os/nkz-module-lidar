@@ -61,6 +61,7 @@ interface LidarContextType {
   // Entity Selection
   selectedEntityId: string | null;
   selectedEntityGeometry: string | null; // WKT
+  isLoadingMetadata: boolean;
   setSelectedEntityId: (id: string | null) => void;
   setSelectedEntityGeometry: (wkt: string | null) => void;
 
@@ -111,7 +112,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Entity geometry (fetched when entity changes)
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
-  const [, setIsLoadingGeometry] = useState(false);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
 
   // Layer state
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
@@ -132,10 +133,16 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Sync with host viewer context - fetch geometry when entity changes
   useEffect(() => {
-    const fetchGeometry = async () => {
+    const fetchMetadata = async () => {
+      const entityId = viewer.selectedEntityId;
       const entityType = viewer.selectedEntityType ?? '';
-      const isAgriParcel = entityType === 'AgriParcel' || entityType.endsWith('/AgriParcel');
-      if (!viewer.selectedEntityId || !isAgriParcel) {
+      
+      // Semantic check for AgriParcel (handles raw, expanded URIs, or namespace-prefixed types)
+      const isAgriParcel = entityType === 'AgriParcel' || 
+                          entityType.includes('/AgriParcel') || 
+                          entityType.includes('#AgriParcel');
+
+      if (!entityId || !isAgriParcel) {
         setSelectedEntityGeometry(null);
         setSelectedLayerId(null);
         setActiveTilesetUrl(null);
@@ -144,46 +151,56 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return;
       }
 
-      // Reset state for new entity
+      // Reset state for new valid entity
       setSelectedLayerId(null);
       setActiveTilesetUrl(null);
       setHasCoverage(null);
       setProcessingJob(null);
-      setIsLoadingGeometry(true);
+      setIsLoadingMetadata(true);
 
       try {
-        // Fetch entity geometry from Context Broker
+        // Retrieve tenant and auth from host context
         const auth = (window as any).__nekazariAuthContext;
         const tenantId = auth?.tenantId;
+        const contextUrl = auth?.contextUrl || 'https://uri.fiware.org/ns/context.jsonld';
 
         const headers: HeadersInit = {
           'Accept': 'application/ld+json',
         };
+        
+        // Ensure NGSI-LD tenant propagation
         if (tenantId) {
           headers['NGSILD-Tenant'] = tenantId;
+          headers['X-Tenant-ID'] = tenantId;
         }
+        
+        // Include Link header for proper context resolution
+        headers['Link'] = `<${contextUrl}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`;
 
-        const response = await fetch(`/ngsi-ld/v1/entities/${encodeURIComponent(viewer.selectedEntityId)}`, {
+        const response = await fetch(`/ngsi-ld/v1/entities/${encodeURIComponent(entityId)}`, {
           headers,
           credentials: 'include',
         });
 
         if (response.ok) {
           const entity = await response.json();
-          const location = entity.location?.value;
+          // location can be in 'location' (NGSI-LD) or 'location.value' (normalized)
+          const location = entity.location?.value || entity.location;
           if (location) {
             const wkt = geoJsonToWkt(location as GeoJSONGeometry);
             setSelectedEntityGeometry(wkt);
           }
+        } else {
+          console.warn(`[LidarContext] Failed to fetch entity metadata: ${response.status}`);
         }
       } catch (error) {
-        console.error('[LidarContext] Error fetching entity geometry:', error);
+        console.error('[LidarContext] Exception fetching entity geometry:', error);
       } finally {
         setIsLoadingGeometry(false);
       }
     };
 
-    fetchGeometry();
+    fetchMetadata();
   }, [viewer.selectedEntityId, viewer.selectedEntityType]);
 
   // Wrapper for selectEntity to match our interface (just id, not id + type)
@@ -352,10 +369,10 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [viewer]);
 
   return (
-    <LidarContext.Provider
       value={{
         selectedEntityId: viewer.selectedEntityId,
         selectedEntityGeometry,
+        isLoadingMetadata,
         setSelectedEntityId,
         setSelectedEntityGeometry,
         selectedLayerId,
