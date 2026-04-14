@@ -370,6 +370,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, [viewer]);
 
   return (
+    <LidarContext.Provider
       value={{
         selectedEntityId: viewer.selectedEntityId,
         selectedEntityGeometry,
