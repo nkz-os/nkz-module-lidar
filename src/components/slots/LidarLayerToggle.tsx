@@ -17,7 +17,7 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'classification', icon: '\u{1F3F7}\uFE0F' },
 ];
 
-const LidarLayerToggle: React.FC = () => {
+  const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
   const {
     selectedEntityId,
@@ -28,15 +28,6 @@ const LidarLayerToggle: React.FC = () => {
     hasCoverage,
   } = useLidarContext();
 
-  if (!selectedEntityId) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 text-slate-400 text-sm">
-        <Layers className="w-4 h-4" />
-        <span>LiDAR</span>
-      </div>
-    );
-  }
-
   return (
     <div className="lidar-module" style={{ marginBottom: '12px' }}>
     <div className="px-3 py-2 space-y-2">
@@ -44,6 +35,7 @@ const LidarLayerToggle: React.FC = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${
+            !selectedEntityId ? 'bg-slate-200' :
             activeTilesetUrl ? 'bg-emerald-500' :
             isProcessing ? 'bg-amber-500 animate-pulse' :
             hasCoverage ? 'bg-violet-500' : 'bg-slate-300'

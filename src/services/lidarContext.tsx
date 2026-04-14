@@ -109,6 +109,9 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Get entity selection from host via SDK
   const viewer = useViewer();
+  
+  // Track selected ID to avoid redundant re-fetches
+  const lastProcessedIdRef = useRef<string | null>(null);
 
   // Entity geometry (fetched when entity changes)
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
@@ -135,14 +138,12 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     const fetchMetadata = async () => {
       const entityId = viewer.selectedEntityId;
-      const entityType = viewer.selectedEntityType ?? '';
       
-      // Semantic check for AgriParcel (handles raw, expanded URIs, or namespace-prefixed types)
-      const isAgriParcel = entityType === 'AgriParcel' || 
-                          entityType.includes('/AgriParcel') || 
-                          entityType.includes('#AgriParcel');
+      // Avoid redundant fetches if ID hasn't changed
+      if (entityId === lastProcessedIdRef.current) return;
+      lastProcessedIdRef.current = entityId;
 
-      if (!entityId || !isAgriParcel) {
+      if (!entityId) {
         setSelectedEntityGeometry(null);
         setSelectedLayerId(null);
         setActiveTilesetUrl(null);
