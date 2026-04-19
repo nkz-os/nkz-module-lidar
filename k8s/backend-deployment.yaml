@@ -29,6 +29,10 @@ spec:
         component: backend
         module: lidar
     spec:
+      volumes:
+        - name: proj-cache
+          persistentVolumeClaim:
+            claimName: lidar-proj-cache-pvc
       containers:
         - name: api
           image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:20260408-145806-orion2
