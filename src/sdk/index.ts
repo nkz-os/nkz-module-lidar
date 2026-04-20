@@ -38,11 +38,12 @@ export type { NekazariAuthContext as AuthContextValue } from '../types';
  * Access the viewer context from the host application.
  */
 export function useViewer(): ViewerHookResult {
-  const viewerContext = window.__nekazariViewerContext;
+  const React = (window as any).React;
+  const ViewerContext = (window as any).__nekazariViewerContextInstance;
 
-  if (!viewerContext || typeof viewerContext.useViewer !== 'function') {
+  if (!React || !ViewerContext) {
     if (import.meta.env.DEV) {
-      console.warn('[SDK] ViewerContext not available on window.__nekazariViewerContext');
+      console.warn('[SDK] ViewerContext instance not available on window');
     }
     return {
       selectedEntityId: null,
@@ -58,7 +59,38 @@ export function useViewer(): ViewerHookResult {
     };
   }
 
-  return viewerContext.useViewer();
+  try {
+    const context = React.useContext(ViewerContext);
+    if (context === undefined) {
+      return {
+        selectedEntityId: null,
+        selectedEntityType: null,
+        currentDate: new Date(),
+        isTimelinePlaying: false,
+        activeLayers: new Set(),
+        isLayerActive: () => false,
+        setLayerActive: () => {},
+        toggleLayer: () => {},
+        selectEntity: () => {},
+        setCurrentDate: () => {},
+      };
+    }
+    return context;
+  } catch (err) {
+    console.error('[SDK] Error consuming ViewerContext:', err);
+    return {
+      selectedEntityId: null,
+      selectedEntityType: null,
+      currentDate: new Date(),
+      isTimelinePlaying: false,
+      activeLayers: new Set(),
+      isLayerActive: () => false,
+      setLayerActive: () => {},
+      toggleLayer: () => {},
+      selectEntity: () => {},
+      setCurrentDate: () => {},
+    };
+  }
 }
 
 /**
