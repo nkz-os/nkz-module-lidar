@@ -31,8 +31,33 @@ import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
+  const context = useLidarContext();
+  
+  // FAILSAFE: Local state to mirror context if it's stuck or non-reactive
+  const [localEntityId, setLocalEntityId] = useState<string | null>(context.selectedEntityId);
+
+  useEffect(() => {
+    // Listen for the global event we added to the Core dispatcher
+    const handleGlobalSelect = (e: any) => {
+      console.log('[LidarUI] Global event received:', e.detail.id);
+      setLocalEntityId(e.detail.id);
+    };
+    window.addEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+    
+    // Initial check from URL if current context is empty (deep links)
+    if (!localEntityId) {
+      const params = new URLSearchParams(window.location.search);
+      const entityId = params.get('entityId');
+      if (entityId) setLocalEntityId(entityId);
+    }
+
+    return () => window.removeEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+  }, []);
+
+  // Use local ID as override for the UI logic
+  const selectedEntityId = localEntityId || context.selectedEntityId;
+
   const {
-    selectedEntityId,
     selectedEntityGeometry,
     isLoadingMetadata,
     activeTilesetUrl,
@@ -48,7 +73,7 @@ const LidarLayerControl: React.FC = () => {
     layers,
     refreshLayers,
     deleteLayer,
-  } = useLidarContext();
+  } = context;
 
   const [showSettings, setShowSettings] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);

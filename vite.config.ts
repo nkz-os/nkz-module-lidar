@@ -4,6 +4,7 @@ import path from 'path';
 
 // IIFE build for Nekazari runtime module injection
 export default defineConfig({
+  base: '/modules/lidar/',
   plugins: [
     react({ jsxRuntime: 'classic' }),
   ],

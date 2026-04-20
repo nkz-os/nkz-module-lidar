@@ -104,16 +104,32 @@ const LidarContext = createContext<LidarContextType | undefined>(undefined);
 // ============================================================================
 
 export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Unique ID for this provider instance (to ignore own sync events)
+  // Unique ID for this provider instance
   const providerIdRef = useRef(Math.random().toString(36).slice(2));
 
-  // Get entity selection from host via SDK
+  // Get entity selection from host
   const viewer = useViewer();
   
+  // Local state for selected entity to ensure reactivity via events
+  const [selectedEntityId, setSelectedEntityIdState] = useState<string | null>(viewer.selectedEntityId);
+  const [selectedEntityType, setSelectedEntityTypeState] = useState<string | null>(viewer.selectedEntityType);
+
+  // Sync with global events (Direct connection)
+  useEffect(() => {
+    const handleGlobalSelect = (e: any) => {
+      const { id, type } = e.detail;
+      setSelectedEntityIdState(id);
+      setSelectedEntityTypeState(type);
+    };
+
+    window.addEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+    return () => window.removeEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+  }, []);
+
   // Track selected ID to avoid redundant re-fetches
   const lastProcessedIdRef = useRef<string | null>(null);
 
-  // Entity geometry (fetched when entity changes)
+  // Entity geometry
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
 

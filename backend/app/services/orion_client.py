@@ -22,7 +22,7 @@ class OrionLDClient:
         self.base_url = settings.ORION_URL.rstrip("/")
         self.tenant_id = tenant_id
         self.headers = {
-            "Content-Type": "application/ld+json",
+            "Content-Type": "application/json",
             "Accept": "application/ld+json",
         }
         if tenant_id:
