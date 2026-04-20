@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
+import { lidarApi } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 
 const LidarLayerControl: React.FC = () => {
