@@ -22,7 +22,6 @@ class OrionLDClient:
         self.base_url = settings.ORION_URL.rstrip("/")
         self.tenant_id = tenant_id
         self.headers = {
-            "Content-Type": "application/json",
             "Accept": "application/ld+json",
         }
         if tenant_id:
@@ -32,8 +31,17 @@ class OrionLDClient:
 
     def _request(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base_url}{endpoint}"
+        
+        req_headers = dict(self.headers)
+        if json_data and "@context" in json_data:
+            req_headers["Content-Type"] = "application/ld+json"
+            if "Link" in req_headers:
+                del req_headers["Link"]
+        elif json_data:
+            req_headers["Content-Type"] = "application/json"
+
         with httpx.Client(timeout=30.0) as client:
-            resp = client.request(method, url, json=json_data, headers=self.headers)
+            resp = client.request(method, url, json=json_data, headers=req_headers)
         if resp.status_code not in (200, 201, 204):
             raise RuntimeError(f"Orion request failed {resp.status_code}: {resp.text}")
         if resp.content:
