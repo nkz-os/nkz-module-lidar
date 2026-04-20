@@ -89,10 +89,7 @@
         {
           "id": "lidar-layer-control",
           "component": "LidarLayerControl",
-          "priority": 15,
-          "showWhen": {
-            "entityType": ["AgriParcel"]
-          }
+          "priority": 15
         },
         {
           "id": "lidar-config",

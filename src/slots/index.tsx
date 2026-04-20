@@ -63,8 +63,7 @@ export const lidarSlots: ModuleViewerSlots = {
       moduleId: MODULE_ID,
       component: 'LidarLayerToggle',
       priority: 10,
-      localComponent: LidarLayerToggle,
-      showWhen: { entityType: ['AgriParcel'] }
+      localComponent: LidarLayerToggle
     }
   ],
   'context-panel': [
@@ -73,8 +72,7 @@ export const lidarSlots: ModuleViewerSlots = {
       moduleId: MODULE_ID,
       component: 'LidarLayerControl',
       priority: 15,
-      localComponent: LidarLayerControl,
-      showWhen: { entityType: ['AgriParcel'] }
+      localComponent: LidarLayerControl
     },
     {
       id: 'lidar-config',
