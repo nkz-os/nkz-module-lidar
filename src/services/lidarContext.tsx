@@ -197,7 +197,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } catch (error) {
         console.error('[LidarContext] Exception fetching entity geometry:', error);
       } finally {
-        setIsLoadingGeometry(false);
+        setIsLoadingMetadata(false);
       }
     };
 

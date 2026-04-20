@@ -70,9 +70,12 @@
     "slots": {
       "layer-toggle": [
         {
-          "id": "lidar-layer-control",
-          "component": "LidarLayerControl",
-          "priority": 10
+          "id": "lidar-layer-toggle",
+          "component": "LidarLayerToggle",
+          "priority": 10,
+          "showWhen": {
+            "entityType": ["AgriParcel"]
+          }
         }
       ],
       "map-layer": [
@@ -84,9 +87,17 @@
       ],
       "context-panel": [
         {
+          "id": "lidar-layer-control",
+          "component": "LidarLayerControl",
+          "priority": 15,
+          "showWhen": {
+            "entityType": ["AgriParcel"]
+          }
+        },
+        {
           "id": "lidar-config",
           "component": "LidarConfig",
-          "priority": 20,
+          "priority": 25,
           "showWhen": {
             "entityType": ["AgriParcel"]
           }
