@@ -206,7 +206,17 @@ const LidarLayerControl: React.FC = () => {
   // =========================================================================
 
   if (!selectedEntityId) {
-    return null;
+    return (
+      <div className="lidar-module p-6 bg-white/80 backdrop-blur-sm rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center gap-3 text-center min-h-[160px]">
+        <div className="p-3 rounded-full bg-violet-50">
+          <Layers className="w-8 h-8 text-violet-400" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-700">{t('noParcelSelected', 'No parcel selected')}</p>
+          <p className="text-xs text-slate-500 mt-1">{t('selectParcelToUpload', 'Select a parcel from the map to upload or download LiDAR data.')}</p>
+        </div>
+      </div>
+    );
   }
 
   if (isLoadingMetadata) {
