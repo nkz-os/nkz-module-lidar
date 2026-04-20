@@ -58,6 +58,8 @@
   "errorFileType": ".LAZ eta .LAS fitxategiak soilik onartzen dira",
   "errorFileSize": "Fitxategia handiegia da (geh. 500MB)",
   "errorUpload": "Errorea fitxategia igotzean",
+  "errorMissingCrs": "Faltan metadatos CRS. Introduce el EPSG de origen antes de subir.",
+  "manualCrsLabel": "CRS de origen (obligatorio si el LAZ no incluye proyección)",
   "deleteLayer": "Geruza ezabatu",
   "deleteConfirm": "Ziur zaude geruza hau ezabatu nahi duzula? Ekintza hau ezin da desegin.",
   "deleting": "Ezabatzen...",
@@ -88,5 +90,9 @@
   "tree.ndvi": "NDVI",
   "tree.location": "Kokapena",
   "tree.biomass": "Biomasa Estimatua",
-  "tree.biomassApprox": "(gutxi gorabehera)"
+  "tree.biomassApprox": "(gutxi gorabehera)",
+  "noParcelSelected": "Ez dago partzelarik hautatuta",
+  "selectParcelToUpload": "Hautatu partzela bat mapan LiDAR datuak igotzeko edo deskargatzeko.",
+  "loadingMetadata": "Entitatearen xehetasunak kargatzen...",
+  "errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
 }

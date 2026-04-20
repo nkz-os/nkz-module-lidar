@@ -71,7 +71,7 @@ export const lidarSlots: ModuleViewerSlots = {
       id: 'lidar-layer-control',
       moduleId: MODULE_ID,
       component: 'LidarLayerControl',
-      priority: 15,
+      priority: -1,
       localComponent: LidarLayerControl
     },
     {
