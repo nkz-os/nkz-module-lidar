@@ -15,7 +15,6 @@ const NKZ = (window as any).__NKZ__;
 if (NKZ && typeof NKZ.register === 'function') {
   NKZ.register({
     id: 'lidar',
-    main: LidarApp,
     viewerSlots: lidarSlots,
   });
 } else {
