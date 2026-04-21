@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY --chown=$MAMBA_USER:$MAMBA_USER app ./app
+COPY --chown=$MAMBA_USER:$MAMBA_USER data ./data
 
 # Set Python path
 ENV PYTHONPATH=/app
