@@ -75,7 +75,7 @@ class OrionLDClient:
         payload: Dict[str, Any] = {"@context": self.CONTEXT}
         for k, v in updates.items():
             payload[k] = {"type": "Property", "value": v}
-        self._request("PATCH", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
+        self._request("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
 
     def get_job(self, entity_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
