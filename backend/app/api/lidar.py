@@ -150,13 +150,13 @@ async def start_processing(
             tenant_id,
             job_timeout=settings.WORKER_TIMEOUT
         )
-        get_orion_client(tenant_id).update_job(job_entity_id, rqJobId=rq_job.id)
+        get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
         logger.info(f"Job {job_entity_id} enqueued successfully (RQ: {rq_job.id})")
         
     except Exception as e:
         logger.error(f"Failed to enqueue job: {e}")
         get_orion_client(tenant_id).update_job(
-            job_entity_id, status="failed", errorMessage=f"Failed to enqueue: {str(e)}"
+            job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -418,13 +418,14 @@ async def upload_laz_file(
                 geometry_wkt,
                 job_timeout=settings.WORKER_TIMEOUT
             )
-            get_orion_client(tenant_id).update_job(job_entity_id, rqJobId=rq_job.id)
+            # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
+            get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
             logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
             
         except Exception as e:
             logger.error(f"Failed to enqueue upload job: {e}")
             get_orion_client(tenant_id).update_job(
-                job_entity_id, status="failed", errorMessage=f"Failed to enqueue: {str(e)}"
+                job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
             )
             
             # Cleanup temp file

@@ -17,45 +17,79 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'classification', icon: '\u{1F3F7}\uFE0F' },
 ];
 
-  const LidarLayerToggle: React.FC = () => {
+const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
   const {
     selectedEntityId,
     activeTilesetUrl,
+    setActiveTilesetUrl,
+    layers,
+    selectedLayerId,
+    setSelectedLayerId,
     colorMode,
     setColorMode,
     isProcessing,
     hasCoverage,
   } = useLidarContext();
 
+  const handleToggle = () => {
+    if (activeTilesetUrl) {
+      // Turn off layer
+      setActiveTilesetUrl(null);
+      setSelectedLayerId(null);
+    } else if (layers && layers.length > 0) {
+      // Turn on the first available layer or the previously selected one
+      const layerToActivate = selectedLayerId 
+        ? layers.find(l => l.id === selectedLayerId) || layers[0]
+        : layers[0];
+      
+      setActiveTilesetUrl(layerToActivate.tileset_url);
+      setSelectedLayerId(layerToActivate.id);
+    }
+  };
+
+  const isActive = !!activeTilesetUrl;
+
   return (
-    <div className="lidar-module" style={{ marginBottom: '12px' }}>
-    <div className="px-3 py-2 space-y-2">
-      {/* Status row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
-            !selectedEntityId ? 'bg-slate-200' :
-            activeTilesetUrl ? 'bg-emerald-500' :
-            isProcessing ? 'bg-amber-500 animate-pulse' :
-            hasCoverage ? 'bg-violet-500' : 'bg-slate-300'
+    <div className="space-y-1 mb-2">
+      <button
+        onClick={handleToggle}
+        disabled={!layers || layers.length === 0 || isProcessing}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${
+          isActive
+            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+            : 'hover:bg-slate-50 text-slate-600'
+        } ${(!layers || layers.length === 0) && !isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        <span className={isActive ? 'text-violet-600' : 'text-slate-400'}>
+          <Layers className="w-4 h-4" />
+        </span>
+        <span className="flex-1 text-left text-sm">LiDAR</span>
+        
+        {isProcessing ? (
+          <Loader2 className="w-3.5 h-3.5 text-violet-500 animate-spin" />
+        ) : (
+          <div className={`w-3 h-3 rounded-full transition-colors ${
+            isActive ? 'bg-blue-500' : 
+            (layers && layers.length > 0 ? 'bg-slate-300' : 'bg-slate-200')
           }`} />
-          <span className="text-sm font-medium text-slate-700">LiDAR</span>
-        </div>
-        {isProcessing && <Loader2 className="w-3.5 h-3.5 text-violet-500 animate-spin" />}
-      </div>
+        )}
+      </button>
 
       {/* Color mode pills (only when layer is active) */}
-      {activeTilesetUrl && (
-        <div className="flex gap-1">
+      {isActive && (
+        <div className="flex justify-end gap-1 px-2">
           {COLOR_MODES.map((m) => (
             <button
               key={m.value}
-              onClick={() => setColorMode(m.value)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setColorMode(m.value);
+              }}
               className={`px-1.5 py-0.5 rounded text-xs transition-colors ${
                 colorMode === m.value
-                  ? 'bg-violet-100 text-violet-700'
-                  : 'hover:bg-slate-100 text-slate-500'
+                  ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                  : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'
               }`}
               title={t(`color.${m.value}`)}
             >
@@ -64,15 +98,6 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
           ))}
         </div>
       )}
-
-      {/* Brief status text */}
-      {!activeTilesetUrl && !isProcessing && (
-        <p className="text-xs text-slate-400">
-          {hasCoverage === null ? '' :
-           hasCoverage ? t('coverageAvailable') : t('noCoverage')}
-        </p>
-      )}
-    </div>
     </div>
   );
 };

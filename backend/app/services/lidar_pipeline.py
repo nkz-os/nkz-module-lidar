@@ -91,13 +91,14 @@ class LidarPipeline:
         error: Optional[str] = None
     ):
         """Update job status in Orion-LD."""
+        if error:
+            message = f"{message} - Error: {error}"
+            
         updates: Dict[str, Any] = {
             "status": status,
             "progress": progress,
             "statusMessage": message,
         }
-        if error:
-            updates["errorMessage"] = error
         if status in ("completed", "failed"):
             updates["completedAt"] = datetime.utcnow().isoformat() + "Z"
         get_orion_client(self.tenant_id).update_job(self.job_id, **updates)
@@ -609,11 +610,10 @@ class LidarPipeline:
             point_count=result.get("point_count", 0),
             tree_count=result.get("tree_count", 0),
         )
-        client.update_job(
-            self.job_id,
-            tilesetUrl=tileset_url,
-            treeCount=result.get("tree_count", 0),
-            pointCount=result.get("point_count", 0),
+        self.update_job_status(
+            "completed", 
+            100, 
+            f"Processed tileset: {tileset_url}"
         )
     
     def _cleanup(self):
