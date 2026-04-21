@@ -241,11 +241,18 @@ class LidarPipeline:
         count = pipeline.execute()
 
         if count == 0:
-            raise ValueError(
+            logger.warning(
                 "No points remain after cropping to parcel boundary. "
-                "This usually means a CRS mismatch between the LAZ file and the parcel geometry, "
-                "or the parcel does not overlap with the downloaded tile."
+                "The uploaded file does not overlap with the parcel. "
+                "Falling back to processing the entire un-cropped file."
             )
+            # Remove the crop filter and run again
+            stages_no_crop = [s for s in stages if s.get("type") != "filters.crop"]
+            pipeline = pdal.Pipeline(json.dumps({"pipeline": stages_no_crop}))
+            count = pipeline.execute()
+            
+            if count == 0:
+                raise ValueError("The provided LAZ file contains 0 valid points even without cropping.")
 
         logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
     
