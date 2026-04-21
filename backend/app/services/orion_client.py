@@ -105,9 +105,9 @@ class OrionLDClient:
         return entity_id
 
     def list_assets(self, parcel_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        q = "assetCategory==LiDAR"
+        q = 'assetCategory=="LiDAR"'
         if parcel_id:
-            q += f";refAgriParcel=={self._parcel_urn(parcel_id)}"
+            q += f';refAgriParcel=="{self._parcel_urn(parcel_id)}"'
         return self._request("GET", f"/ngsi-ld/v1/entities?type=DigitalAsset&q={q}&limit=1000") or []
 
     def get_asset(self, entity_id: str) -> Dict[str, Any]:
