@@ -729,10 +729,10 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     
     Args:
         job_id: UUID of the LidarProcessingJob
-        file_path: Path to the uploaded LAZ/LAS file
+        file_path: S3 key of the uploaded LAZ/LAS file in lidar-source-tiles
         geometry_wkt: Optional WKT for cropping (if None, use entire file)
     """
-    logger.info("Worker starting upload job: %s (file: %s)", job_entity_id, file_path)
+    logger.info("Worker starting upload job: %s (file key: %s)", job_entity_id, file_path)
     client = get_orion_client(tenant_id)
     job = client.get_job(job_entity_id)
     parcel_urn = job.get("refAgriParcel", {}).get("object", "")
@@ -740,23 +740,42 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     config = job.get("config", {}).get("value", {}) or {}
     pipeline = LidarPipeline(job_entity_id, tenant_id=tenant_id, parcel_id=parcel_id)
     
-    # If no geometry provided, skip cropping
-    if not geometry_wkt:
-        # Modify the pipeline to skip cropping
-        # The phase_a_ingest will just copy the file
-        logger.info("No geometry provided, processing entire file")
+    import tempfile
+    import os
+    from app.services.storage import storage_service
+    import boto3
     
-    result = pipeline.process(file_path, geometry_wkt or "", config)
+    # Download file from MinIO
+    ext = file_path.split('.')[-1]
+    temp_dir = tempfile.mkdtemp(prefix="lidar_worker_")
+    local_file_path = os.path.join(temp_dir, f"upload.{ext}")
     
-    # Cleanup the uploaded file after processing
     try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            parent_dir = os.path.dirname(file_path)
-            if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-                os.rmdir(parent_dir)
-    except Exception as e:
-        logger.warning(f"Failed to cleanup uploaded file: {e}")
-    
+        storage_service.download_file("lidar-source-tiles", file_path, local_file_path)
+        logger.info(f"Downloaded uploaded file from MinIO to {local_file_path}")
+        
+        # If no geometry provided, skip cropping
+        if not geometry_wkt:
+            logger.info("No geometry provided, processing entire file")
+        
+        result = pipeline.process(local_file_path, geometry_wkt or "", config)
+    finally:
+        # Cleanup the downloaded file after processing
+        try:
+            if os.path.exists(local_file_path):
+                os.remove(local_file_path)
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup local downloaded file: {e}")
+        
+        # Cleanup original upload from MinIO
+        try:
+            prefix_to_delete = "/".join(file_path.split("/")[:-1])
+            storage_service.delete_prefix(prefix_to_delete)
+            logger.info(f"Cleaned up uploaded file from MinIO prefix {prefix_to_delete}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup MinIO uploaded file: {e}")
+            
     return result
 

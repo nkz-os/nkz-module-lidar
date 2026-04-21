@@ -393,9 +393,31 @@ async def upload_laz_file(
         inspect_laz_crs(temp_file_path, source_crs_override=source_crs)
         
         job_id = str(uuid4())
+        
+        # Upload the file to MinIO temp location so the worker can download it
+        from app.services.storage import storage_service
+        s3_key = f"user_uploads/{tenant_id}/{job_id}/upload.{file_ext}"
+        storage_service.ensure_bucket("lidar-source-tiles")
+        storage_service.upload_file(
+            bucket="lidar-source-tiles",
+            key=s3_key,
+            file_path=temp_file_path,
+            content_type="application/octet-stream"
+        )
+        logger.info(f"Uploaded file stored in MinIO at lidar-source-tiles/{s3_key}")
+        
+        # Cleanup local API temp file immediately after upload to MinIO
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to cleanup local temp file: {cleanup_err}")
+
         config_payload = {
             **config_dict,
-            "uploaded_file_path": temp_file_path,
+            "uploaded_file_path": s3_key,
             "source": "user_upload",
             "source_crs": source_crs,
         }
@@ -414,7 +436,7 @@ async def upload_laz_file(
                 process_uploaded_file,
                 job_entity_id,
                 tenant_id,
-                temp_file_path,
+                s3_key,
                 geometry_wkt,
                 job_timeout=settings.WORKER_TIMEOUT
             )
