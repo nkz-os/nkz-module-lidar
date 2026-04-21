@@ -83,7 +83,7 @@ class OrionLDClient:
     def list_jobs(self, limit: int, offset: int) -> List[Dict[str, Any]]:
         return self._request(
             "GET",
-            f"/ngsi-ld/v1/entities?type=DataProcessingJob&q=jobType==lidar&limit={limit}&offset={offset}",
+            f"/ngsi-ld/v1/entities?type=DataProcessingJob&q=jobType==\"lidar\"&limit={limit}&offset={offset}",
         ) or []
 
     def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int) -> str:
