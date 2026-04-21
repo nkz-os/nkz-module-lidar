@@ -12,6 +12,8 @@ import React, { createContext, useContext, useState, ReactNode, useCallback, use
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
 import type { GeoJSONGeometry } from '../types';
+import { lidarStore } from './lidarStore';
+import { useSyncExternalStore } from 'react';
 
 // ============================================================================
 // Cross-Provider Sync Events
@@ -133,14 +135,48 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
 
-  // Layer state
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-  const [activeTilesetUrl, setActiveTilesetUrl] = useState<string | null>(null);
-  const [layers, setLayers] = useState<Layer[]>([]);
+  // Layer state synced across instances
+  const selectedLayerId = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.selectedLayerId
+  );
+  const activeTilesetUrl = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.activeTilesetUrl
+  );
+  const colorMode = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.colorMode
+  );
+  const showTrees = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.showTrees
+  );
 
-  // Visualization state
-  const [colorMode, setColorMode] = useState<ColorMode>('height');
-  const [showTrees, setShowTrees] = useState(false);
+  const setSelectedLayerId = useCallback((id: string | null) => {
+    lidarStore.setLayerState(id, lidarStore.activeTilesetUrl);
+  }, []);
+
+  const setActiveTilesetUrl = useCallback((url: string | null) => {
+    lidarStore.setLayerState(lidarStore.selectedLayerId, url);
+  }, []);
+
+  const setColorMode = useCallback((mode: ColorMode) => {
+    lidarStore.setColorMode(mode);
+  }, []);
+
+  const setShowTrees = useCallback((show: boolean) => {
+    lidarStore.setShowTrees(show);
+  }, []);
+
+  const layers = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.layers
+  );
+
+  const setLayers = useCallback((newLayers: Layer[]) => {
+    lidarStore.setLayers(newLayers);
+  }, []);
 
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);

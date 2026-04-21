@@ -29,6 +29,7 @@ import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 import { lidarApi } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
+import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
 
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
@@ -151,7 +152,7 @@ const LidarLayerControl: React.FC = () => {
 
     try {
       // Lazy load worker or handle potential failure
-      const parserWorker = new Worker(new URL('../../workers/lazHeaderWorker.ts', import.meta.url), { type: 'module' });
+      const parserWorker = new LazWorker();
       const headerInfo: LazHeaderParseResult = await new Promise((resolve, reject) => {
         parserWorker.onmessage = (ev) => resolve(ev.data as LazHeaderParseResult);
         parserWorker.onerror = (err) => reject(err);
