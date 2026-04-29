@@ -61,7 +61,7 @@ class LidarPipeline:
         Initialize the pipeline.
         
         Args:
-            job_id: UUID of the LidarProcessingJob
+            job_id: UUID of the Orion-LD DataProcessingJob
             work_dir: Optional working directory (temp dir created if not provided)
         """
         self.job_id = job_id
@@ -604,7 +604,7 @@ class LidarPipeline:
         Create Orion-LD entities for the processed data.
         
         Creates:
-        - PointCloudLayer entity for the tileset
+        - DigitalAsset entity for the tileset
         - AgriTree entities for detected trees (if any)
         """
         client = get_orion_client(self.tenant_id)
@@ -709,7 +709,7 @@ def process_lidar_job(job_entity_id: str, tenant_id: str):
     This function is called by the RQ worker.
     
     Args:
-        job_id: UUID of the LidarProcessingJob to process
+        job_id: UUID of the Orion-LD DataProcessingJob to process
     """
     logger.info("Worker starting job: %s", job_entity_id)
     client = get_orion_client(tenant_id)
@@ -735,7 +735,7 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     This function is called by the RQ worker for user-uploaded files.
     
     Args:
-        job_id: UUID of the LidarProcessingJob
+        job_id: UUID of the Orion-LD DataProcessingJob
         file_path: S3 key of the uploaded LAZ/LAS file in lidar-source-tiles
         geometry_wkt: Optional WKT for cropping (if None, use entire file)
     """

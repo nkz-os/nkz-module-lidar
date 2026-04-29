@@ -1,17 +1,3 @@
-"""Models package."""
-from app.models.lidar_models import (
-    LidarCoverageIndex,
-    LidarProcessingJob,
-    PointCloudLayer,
-    LidarTileCache,
-    JobStatus
-)
-
-__all__ = [
-    "LidarCoverageIndex",
-    "LidarProcessingJob",
-    "PointCloudLayer",
-    "LidarTileCache",
-    "JobStatus"
-]
-
+# SQLAlchemy models removed after Orion-LD refactor (2026-04-08).
+# All job/asset state lives in Orion-LD DataProcessingJob / DigitalAsset entities.
+# Keep this file for package structure compatibility.

@@ -32,8 +32,7 @@ httpx==0.23.3
 requests==2.31.0
 shapely==2.0.6
 
-# NGSI-LD / Orion integration
-ngsildclient==0.5.2
+# NGSI-LD / Orion integration (custom OrionLDClient used instead)
 
 # 3D Tiles conversion (not available on conda-forge)
 py3dtiles[las,ply]==7.0.0
