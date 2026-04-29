@@ -58,6 +58,8 @@
   "errorFileType": "Nomes es permeten arxius .LAZ i .LAS",
   "errorFileSize": "L'arxiu es massa gran (max. 500MB)",
   "errorUpload": "Error en pujar l'arxiu",
+  "errorMissingCrs": "Falten metadades CRS. Introdueix l'EPSG d'origen abans de pujar.",
+  "manualCrsLabel": "CRS d'origen (obligatori si el LAZ no té projecció)",
   "deleteLayer": "Eliminar capa",
   "deleteConfirm": "Segur que vols eliminar aquesta capa? Aquesta accio no es pot desfer.",
   "deleting": "Eliminant...",
@@ -88,5 +90,10 @@
   "tree.ndvi": "NDVI",
   "tree.location": "Ubicacio",
   "tree.biomass": "Biomassa Estimada",
-  "tree.biomassApprox": "(aproximat)"
+  "tree.biomassApprox": "(aproximat)",
+  "cancelProcessing": "Cancel·lar processament",
+  "errorNoGeometry": "Es requereix la geometria de l'entitat per a la descàrrega del PNOA.",
+  "loadingMetadata": "Carregant detalls de l'entitat...",
+  "noParcelSelected": "Cap parcel·la seleccionada",
+  "selectParcelToUpload": "Selecciona una parcel·la del mapa per pujar o descarregar dades LiDAR."
 }

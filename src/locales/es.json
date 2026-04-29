@@ -5,7 +5,7 @@
   "feature.download.title": "Descarga PNOA",
   "feature.download.desc": "Acceso a datos LiDAR del Plan Nacional de Ortofotografía Aérea para cualquier parcela de España.",
   "feature.upload.title": "Upload Personalizado",
-  "feature.upload.desc": "Sube archivos .LAZ de vuelos de dron propios. Compatible con cualquier s sentsor LiDAR georreferenciado.",
+  "feature.upload.desc": "Sube archivos .LAZ de vuelos de dron propios. Compatible con cualquier sensor LiDAR georreferenciado.",
   "feature.trees.title": "Detección de Árboles",
   "feature.trees.desc": "Algoritmos avanzados de segmentación para identificar árboles individuales, altura y área de copa.",
   "pipeline.title": "Pipeline de Procesamiento",
