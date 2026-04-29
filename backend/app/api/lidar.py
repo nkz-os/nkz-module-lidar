@@ -116,6 +116,12 @@ def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
 # API Endpoints
 # ============================================================================
 
+@router.get("/health")
+async def router_health():
+    """Public health endpoint (reachable via ingress /api/lidar/health)."""
+    return {"status": "healthy", "module": "lidar", "version": "1.0.0"}
+
+
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("5 per minute")
 async def start_processing(
