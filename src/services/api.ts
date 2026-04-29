@@ -158,6 +158,15 @@ class LidarApiClient {
     }
 
     /**
+     * Cancel a running or queued processing job
+     */
+    async cancelJob(jobId: string): Promise<void> {
+        return this.request(`/process/${jobId}/cancel`, {
+            method: 'POST',
+        });
+    }
+
+    /**
      * Poll job status until completion or failure
      */
     async pollJobStatus(

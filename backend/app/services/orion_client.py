@@ -116,6 +116,15 @@ class OrionLDClient:
     def delete_asset(self, entity_id: str) -> None:
         self._request("DELETE", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
 
+    def cancel_job(self, entity_id: str) -> None:
+        payload = {
+            "@context": self.CONTEXT,
+            "status": {"type": "Property", "value": "cancelled"},
+            "completedAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+            "statusMessage": {"type": "Property", "value": "Cancelled by user"},
+        }
+        self._request("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
+
 
 def get_orion_client(tenant_id: Optional[str] = None) -> OrionLDClient:
     return OrionLDClient(tenant_id=tenant_id)

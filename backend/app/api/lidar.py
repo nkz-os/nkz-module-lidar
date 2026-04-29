@@ -172,6 +172,43 @@ async def start_processing(
     )
 
 
+@router.post("/process/{job_id}/cancel")
+async def cancel_processing(
+    job_id: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    Cancel a running or queued processing job.
+    """
+    entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
+    try:
+        job = get_orion_client(tenant_id).get_job(entity_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = _prop(job, "status", "")
+    if status in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel job with status '{status}'"
+        )
+
+    # Remove from RQ queue if queued
+    if status in ("queued", "pending"):
+        try:
+            queue = get_redis_queue()
+            for rq_job in queue.get_jobs():
+                if rq_job.meta.get("job_entity_id") == entity_id:
+                    rq_job.cancel()
+                    break
+        except Exception as e:
+            logger.warning(f"Could not remove job from RQ queue: {e}")
+
+    get_orion_client(tenant_id).cancel_job(entity_id)
+    return {"job_id": job_id, "status": "cancelled"}
+
+
 @router.get("/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(
     job_id: str,
