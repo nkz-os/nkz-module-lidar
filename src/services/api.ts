@@ -30,7 +30,7 @@ export interface ProcessResponse {
 
 export interface JobStatus {
     job_id: string;
-    status: 'pending' | 'queued' | 'processing' | 'completed' | 'failed';
+    status: 'pending' | 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
     progress: number;
     status_message?: string;
     error_message?: string;
