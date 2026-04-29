@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
@@ -120,6 +120,15 @@ def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
 async def router_health():
     """Public health endpoint (reachable via ingress /api/lidar/health)."""
     return {"status": "healthy", "module": "lidar", "version": "1.0.0"}
+
+
+@router.get("/metrics")
+async def router_metrics():
+    """Public Prometheus metrics (reachable via ingress /api/lidar/metrics)."""
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get("http://localhost:8000/metrics")
+        return PlainTextResponse(content=resp.text, media_type="text/plain; version=0.0.4")
 
 
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
