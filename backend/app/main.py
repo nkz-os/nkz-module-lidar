@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -98,6 +99,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Include routers
 from app.api import lidar
 app.include_router(lidar.router, prefix="/api/lidar", tags=["LIDAR Processing"])
+
+# Prometheus metrics (no auth — internal cluster use)
+Instrumentator(
+    should_group_status_codes=True,
+    should_ignore_untemplated=True,
+    should_respect_env_var=True,
+).instrument(app).expose(app, endpoint="/metrics")
 
 
 @app.get("/health")

@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
 
+from prometheus_client import Histogram
+
 from app.config import settings
 from app.main import limiter
 from app.middleware.auth import get_tenant_id, require_auth
@@ -26,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 ALLOWED_CORS_ORIGINS = {o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()}
+
+# Prometheus metric: LiDAR processing job duration
+lidar_job_duration = Histogram(
+    'lidar_job_duration_seconds',
+    'Duration of LiDAR processing jobs',
+    buckets=[60, 300, 600, 1800, 3600, 7200]
+)
 
 
 # ============================================================================

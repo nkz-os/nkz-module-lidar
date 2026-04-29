@@ -43,6 +43,9 @@ lazrs>=0.8.0
 python-dotenv==1.0.0
 python-dateutil==2.8.2
 
+# Prometheus metrics
+prometheus-fastapi-instrumentator==7.0.0
+
 # Logging
 structlog==24.1.0
 
