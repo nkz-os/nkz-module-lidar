@@ -4,6 +4,7 @@ FastAPI main application for LIDAR module.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -27,6 +28,15 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("Starting LIDAR Module API...")
+    # Validate coverage index exists
+    coverage_path = Path(settings.COVERAGE_INDEX_GEOJSON_PATH)
+    if not coverage_path.exists():
+        logger.error(
+            "COVERAGE_INDEX_GEOJSON_PATH not found: %s. Coverage checks will return empty.",
+            coverage_path,
+        )
+    else:
+        logger.info("Coverage index loaded from %s", coverage_path)
     yield
     logger.info("Shutting down LIDAR Module API...")
 
