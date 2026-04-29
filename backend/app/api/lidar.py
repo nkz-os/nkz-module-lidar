@@ -119,36 +119,37 @@ def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("5 per minute")
 async def start_processing(
-    request: ProcessRequest,
+    request: Request,
+    body: ProcessRequest,
     current_user: dict = Depends(require_auth),
     tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Start LiDAR processing for a parcel.
-    
+
     This endpoint:
     1. Validates the parcel has LiDAR coverage
     2. Creates a processing job record
     3. Enqueues the job in Redis for worker processing
-    
+
     Returns immediately with job ID for status polling.
     """
-    logger.info(f"Processing request for parcel {request.parcel_id} by tenant {tenant_id}")
-    
+    logger.info(f"Processing request for parcel {body.parcel_id} by tenant {tenant_id}")
+
     # Check coverage first
     indexer = PNOAIndexer()
-    if not indexer.has_coverage(request.parcel_geometry_wkt):
+    if not indexer.has_coverage(body.parcel_geometry_wkt):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No LiDAR coverage available for this parcel"
         )
-    
+
     job_id = str(uuid4())
     job_entity_id = await get_orion_client(tenant_id).create_processing_job(
         job_id=job_id,
-        parcel_id=request.parcel_id,
-        geometry_wkt=request.parcel_geometry_wkt,
-        config=request.config.model_dump(),
+        parcel_id=body.parcel_id,
+        geometry_wkt=body.parcel_geometry_wkt,
+        config=body.config.model_dump(),
         user_id=current_user.get("sub", "unknown"),
     )
     
@@ -380,6 +381,7 @@ async def list_jobs(
 @router.post("/upload", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3 per minute")
 async def upload_laz_file(
+    request: Request,
     file: UploadFile = File(..., description="LAZ or LAS file to upload"),
     parcel_id: str = Form(..., description="Parcel entity ID"),
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
