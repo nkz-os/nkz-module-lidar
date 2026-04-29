@@ -94,5 +94,6 @@
   "noParcelSelected": "No parcel selected",
   "selectParcelToUpload": "Select a parcel from the map to upload or download LiDAR data.",
   "loadingMetadata": "Loading entity details...",
-  "errorNoGeometry": "Entity geometry is required for PNOA download."
+  "errorNoGeometry": "Entity geometry is required for PNOA download.",
+  "cancelProcessing": "Cancel processing"
 }

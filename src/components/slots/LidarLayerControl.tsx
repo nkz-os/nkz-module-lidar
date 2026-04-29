@@ -70,6 +70,7 @@ const LidarLayerControl: React.FC = () => {
     processingConfig,
     setProcessingConfig,
     startProcessing,
+    cancelProcessing,
     hasCoverage,
     checkCoverage,
     layers,
@@ -384,6 +385,12 @@ const LidarLayerControl: React.FC = () => {
             <p className="text-xs text-violet-700">
               {processingJob.status_message || t('processingPointCloud')}
             </p>
+            <button
+              onClick={() => cancelProcessing()}
+              className="mt-2 w-full text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+            >
+              {t('cancelProcessing')}
+            </button>
           </div>
         )}
 

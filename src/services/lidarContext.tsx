@@ -85,6 +85,7 @@ interface LidarContextType {
   processingConfig: ProcessingConfig;
   setProcessingConfig: (config: ProcessingConfig) => void;
   startProcessing: () => Promise<void>;
+  cancelProcessing: () => Promise<void>;
 
   // Coverage
   hasCoverage: boolean | null;
@@ -108,6 +109,7 @@ const LidarContext = createContext<LidarContextType | undefined>(undefined);
 export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Unique ID for this provider instance
   const providerIdRef = useRef(Math.random().toString(36).slice(2));
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Get entity selection from host
   const viewer = useViewer();
@@ -367,6 +369,9 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       throw new Error('No entity selected');
     }
 
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
     setIsProcessing(true);
     setProcessingJob(null);
 
@@ -382,7 +387,10 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         response.job_id,
         (status) => {
           setProcessingJob(status);
-        }
+        },
+        2000,
+        300,
+        abortControllerRef.current.signal,
       );
 
       // Update with final results
@@ -391,13 +399,29 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         await refreshLayers();
         notifyOtherProviders();
       }
-    } catch (error) {
-      console.error('[LidarContext] Processing failed:', error);
-      throw error;
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('[LidarContext] Processing failed:', error);
+        throw error;
+      }
     } finally {
       setIsProcessing(false);
+      abortControllerRef.current = null;
     }
   }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers, notifyOtherProviders]);
+
+  const cancelProcessing = useCallback(async () => {
+    abortControllerRef.current?.abort();
+    if (processingJob?.job_id) {
+      try {
+        await lidarApi.cancelJob(processingJob.job_id);
+      } catch (e) {
+        console.error('Failed to cancel job on server:', e);
+      }
+    }
+    setIsProcessing(false);
+    setProcessingJob(null);
+  }, [processingJob]);
 
   // Color mode setter with cross-provider sync
   const setColorModeWithSync = useCallback((mode: ColorMode) => {
@@ -442,6 +466,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         processingConfig,
         setProcessingConfig,
         startProcessing,
+        cancelProcessing,
         hasCoverage,
         checkCoverage,
         layers,

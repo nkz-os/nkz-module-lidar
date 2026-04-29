@@ -173,12 +173,18 @@ class LidarApiClient {
         jobId: string,
         onProgress: (status: JobStatus) => void,
         intervalMs: number = 2000,
-        maxAttempts: number = 300 // 10 minutes max
+        maxAttempts: number = 300, // 10 minutes max
+        signal?: AbortSignal,
     ): Promise<JobStatus> {
         let attempts = 0;
 
         return new Promise((resolve, reject) => {
             const poll = async () => {
+                if (signal?.aborted) {
+                    reject(new DOMException('Aborted', 'AbortError'));
+                    return;
+                }
+
                 try {
                     attempts++;
                     const status = await this.getJobStatus(jobId);
@@ -189,8 +195,8 @@ class LidarApiClient {
                         return;
                     }
 
-                    if (status.status === 'failed') {
-                        reject(new Error(status.error_message || 'Processing failed'));
+                    if (status.status === 'failed' || status.status === 'cancelled') {
+                        reject(new Error(status.error_message || 'Processing stopped'));
                         return;
                     }
 
@@ -199,8 +205,12 @@ class LidarApiClient {
                         return;
                     }
 
-                    // Continue polling
-                    setTimeout(poll, intervalMs);
+                    // Continue polling with abort support
+                    const timerId = setTimeout(poll, intervalMs);
+                    signal?.addEventListener('abort', () => {
+                        clearTimeout(timerId);
+                        reject(new DOMException('Aborted', 'AbortError'));
+                    }, { once: true });
                 } catch (error) {
                     reject(error);
                 }
