@@ -30,14 +30,14 @@ def migrate(records: List[Dict[str, Any]], tenant_id: str, dry_run: bool = False
             continue
 
         if not dry_run:
-            client.create_processing_job(
+            client.create_processing_job_sync(
                 job_id=job_id,
                 parcel_id=parcel_id,
                 geometry_wkt=item.get("parcel_geometry_wkt", ""),
                 config=item.get("config", {}),
                 user_id=item.get("user_id", "legacy-migration"),
             )
-            client.update_job(
+            client.update_job_sync(
                 f"urn:ngsi-ld:DataProcessingJob:{job_id}",
                 status=item.get("status", "completed"),
                 progress=item.get("progress", 100),
@@ -47,7 +47,7 @@ def migrate(records: List[Dict[str, Any]], tenant_id: str, dry_run: bool = False
         tileset_url = item.get("tileset_url")
         if tileset_url:
             if not dry_run:
-                client.create_digital_asset(
+                client.create_digital_asset_sync(
                     asset_id=job_id,
                     parcel_id=parcel_id,
                     tileset_url=tileset_url,

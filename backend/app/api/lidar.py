@@ -135,7 +135,7 @@ async def start_processing(
         )
     
     job_id = str(uuid4())
-    job_entity_id = get_orion_client(tenant_id).create_processing_job(
+    job_entity_id = await get_orion_client(tenant_id).create_processing_job(
         job_id=job_id,
         parcel_id=request.parcel_id,
         geometry_wkt=request.parcel_geometry_wkt,
@@ -152,12 +152,12 @@ async def start_processing(
             tenant_id,
             job_timeout=settings.WORKER_TIMEOUT
         )
-        get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+        await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
         logger.info(f"Job {job_entity_id} enqueued successfully (RQ: {rq_job.id})")
         
     except Exception as e:
         logger.error(f"Failed to enqueue job: {e}")
-        get_orion_client(tenant_id).update_job(
+        await get_orion_client(tenant_id).update_job(
             job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
         )
         raise HTTPException(
@@ -183,7 +183,7 @@ async def cancel_processing(
     """
     entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
     try:
-        job = get_orion_client(tenant_id).get_job(entity_id)
+        job = await get_orion_client(tenant_id).get_job(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -205,7 +205,7 @@ async def cancel_processing(
         except Exception as e:
             logger.warning(f"Could not remove job from RQ queue: {e}")
 
-    get_orion_client(tenant_id).cancel_job(entity_id)
+    await get_orion_client(tenant_id).cancel_job(entity_id)
     return {"job_id": job_id, "status": "cancelled"}
 
 
@@ -222,7 +222,7 @@ async def get_job_status(
     """
     entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
     try:
-        job = get_orion_client(tenant_id).get_job(entity_id)
+        job = await get_orion_client(tenant_id).get_job(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -266,7 +266,7 @@ async def get_layers(
     """
     Get available point cloud layers for the tenant.
     """
-    layers = get_orion_client(tenant_id).list_assets(parcel_id=parcel_id)
+    layers = await get_orion_client(tenant_id).list_assets(parcel_id=parcel_id)
     return [
         LayerResponse(
             id=l.get("id", "").split(":")[-1],
@@ -291,7 +291,7 @@ async def get_layer(
     """
     entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        layer = get_orion_client(tenant_id).get_asset(entity_id)
+        layer = await get_orion_client(tenant_id).get_asset(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
 
@@ -313,19 +313,19 @@ async def delete_layer(
 ):
     """
     Delete a point cloud layer.
-    
+
     This also removes the tileset from storage.
     """
     entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        get_orion_client(tenant_id).get_asset(entity_id)
+        await get_orion_client(tenant_id).get_asset(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
 
     from app.services.storage import storage_service
     prefix = layer_id
     storage_service.delete_prefix(prefix)
-    get_orion_client(tenant_id).delete_asset(entity_id)
+    await get_orion_client(tenant_id).delete_asset(entity_id)
 
     logger.info(f"Deleted layer {layer_id} for tenant {tenant_id}")
     
@@ -344,7 +344,7 @@ async def list_jobs(
     """
     List processing jobs for the tenant.
     """
-    jobs = get_orion_client(tenant_id).list_jobs(limit=limit, offset=offset)
+    jobs = await get_orion_client(tenant_id).list_jobs(limit=limit, offset=offset)
     if status_filter:
         jobs = [j for j in jobs if _prop(j, "status") == status_filter]
     if parcel_id:
@@ -461,7 +461,7 @@ async def upload_laz_file(
             "source": "user_upload",
             "source_crs": source_crs,
         }
-        job_entity_id = get_orion_client(tenant_id).create_processing_job(
+        job_entity_id = await get_orion_client(tenant_id).create_processing_job(
             job_id=job_id,
             parcel_id=parcel_id,
             geometry_wkt=geometry_wkt,
@@ -481,15 +481,15 @@ async def upload_laz_file(
                 job_timeout=settings.WORKER_TIMEOUT
             )
             # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
-            get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+            await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
             logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
             
         except Exception as e:
             logger.error(f"Failed to enqueue upload job: {e}")
-            get_orion_client(tenant_id).update_job(
+            await get_orion_client(tenant_id).update_job(
                 job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
             )
-            
+
             # Cleanup temp file
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)

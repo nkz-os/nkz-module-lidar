@@ -1,10 +1,13 @@
 from app.services.orion_client import OrionLDClient
 
+import pytest
 
-def test_create_processing_job_builds_expected_entity(monkeypatch):
+
+@pytest.mark.asyncio
+async def test_create_processing_job_builds_expected_entity(monkeypatch):
     captured = {}
 
-    def fake_request(self, method, endpoint, json_data=None):
+    async def fake_request(self, method, endpoint, json_data=None):
         captured["method"] = method
         captured["endpoint"] = endpoint
         captured["json"] = json_data
@@ -12,7 +15,7 @@ def test_create_processing_job_builds_expected_entity(monkeypatch):
 
     monkeypatch.setattr(OrionLDClient, "_request", fake_request)
     client = OrionLDClient(tenant_id="tenant-a")
-    entity_id = client.create_processing_job(
+    entity_id = await client.create_processing_job(
         job_id="job-1",
         parcel_id="parcel-1",
         geometry_wkt="POLYGON((0 0,1 0,1 1,0 1,0 0))",

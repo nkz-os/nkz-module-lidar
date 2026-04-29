@@ -101,7 +101,7 @@ class LidarPipeline:
         }
         if status in ("completed", "failed"):
             updates["completedAt"] = datetime.utcnow().isoformat() + "Z"
-        get_orion_client(self.tenant_id).update_job(self.job_id, **updates)
+        get_orion_client(self.tenant_id).update_job_sync(self.job_id, **updates)
     
     def process(
         self,
@@ -609,7 +609,7 @@ class LidarPipeline:
         """
         client = get_orion_client(self.tenant_id)
         asset_id = self.job_id.split(":")[-1]
-        client.create_digital_asset(
+        client.create_digital_asset_sync(
             asset_id=asset_id,
             parcel_id=self.parcel_id,
             tileset_url=tileset_url,
@@ -713,7 +713,7 @@ def process_lidar_job(job_entity_id: str, tenant_id: str):
     """
     logger.info("Worker starting job: %s", job_entity_id)
     client = get_orion_client(tenant_id)
-    job = client.get_job(job_entity_id)
+    job = client.get_job_sync(job_entity_id)
     parcel_urn = job.get("refAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     geometry_wkt = job.get("parcelGeometryWKT", {}).get("value", "")
@@ -741,7 +741,7 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     """
     logger.info("Worker starting upload job: %s (file key: %s)", job_entity_id, file_path)
     client = get_orion_client(tenant_id)
-    job = client.get_job(job_entity_id)
+    job = client.get_job_sync(job_entity_id)
     parcel_urn = job.get("refAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     config = job.get("config", {}).get("value", {}) or {}
