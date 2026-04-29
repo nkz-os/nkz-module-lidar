@@ -125,10 +125,11 @@ async def router_health():
 @router.get("/metrics")
 async def router_metrics():
     """Public Prometheus metrics (reachable via ingress /api/lidar/metrics)."""
-    import httpx
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get("http://localhost:8000/metrics")
-        return PlainTextResponse(content=resp.text, media_type="text/plain; version=0.0.4")
+    from prometheus_client import generate_latest, REGISTRY
+    return PlainTextResponse(
+        content=generate_latest(REGISTRY).decode("utf-8"),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
