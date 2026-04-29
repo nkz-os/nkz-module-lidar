@@ -15,6 +15,7 @@ from redis import Redis
 from rq import Queue
 
 from app.config import settings
+from app.main import limiter
 from app.middleware.auth import get_tenant_id, require_auth
 from app.services.lidar_pipeline import process_lidar_job, process_uploaded_file
 from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs
@@ -107,6 +108,7 @@ def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
 # ============================================================================
 
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("5 per minute")
 async def start_processing(
     request: ProcessRequest,
     current_user: dict = Depends(require_auth),
@@ -330,6 +332,7 @@ async def list_jobs(
 
 
 @router.post("/upload", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("3 per minute")
 async def upload_laz_file(
     file: UploadFile = File(..., description="LAZ or LAS file to upload"),
     parcel_id: str = Form(..., description="Parcel entity ID"),

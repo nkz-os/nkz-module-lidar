@@ -6,8 +6,12 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from redis import Redis
+import os
 
-from app.api import lidar
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -57,11 +61,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiter: Redis-backed with in-memory fallback
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+def _get_redis_connection():
+    try:
+        return Redis.from_url(REDIS_URL)
+    except Exception:
+        return None
+
+
+redis_conn = _get_redis_connection()
+limiter_storage_uri = REDIS_URL if redis_conn else "memory://"
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=limiter_storage_uri,
+    default_limits=["60 per minute"],
+)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Include routers
+from app.api import lidar
 app.include_router(lidar.router, prefix="/api/lidar", tags=["LIDAR Processing"])
 
 
 @app.get("/health")
+@limiter.exempt
 async def health_check():
     """Health check endpoint."""
     return {
