@@ -8,8 +8,9 @@
  * - Performance optimization with screen space error
  */
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
+import { Loader2 } from 'lucide-react';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Cesium types are loaded globally by the host at runtime.
@@ -66,6 +67,8 @@ const COLOR_RAMPS: Record<string, string> = {
 export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
   const { activeTilesetUrl, colorMode } = useLidarContext();
   const tilesetRef = useRef<CesiumTilesetType | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   /**
    * Create style expression for current color mode
@@ -94,7 +97,10 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
 
     // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
-    if (!Cesium) return;
+    if (!Cesium) {
+      setLoadError('CesiumJS not available');
+      return;
+    }
 
     // Cleanup previous tileset
     if (tilesetRef.current) {
@@ -102,7 +108,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
       tilesetRef.current = null;
     }
 
-    if (!activeTilesetUrl) return;
+    if (!activeTilesetUrl) {
+      setIsLoading(false);
+      setLoadError(null);
+      return;
+    }
+
+    setIsLoading(true);
 
     const loadTileset = async () => {
       try {
@@ -145,9 +157,12 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
               1000
             ),
           });
+          setIsLoading(false);
         }
       } catch (error) {
         console.error('[LidarLayer] Error loading 3D Tiles:', error);
+        setLoadError('Failed to load point cloud');
+        setIsLoading(false);
       }
     };
 
@@ -174,7 +189,25 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
     }
   }, [colorMode, createStyle]);
 
-  // This component doesn't render visible DOM elements
+  // Show loading indicator while tileset loads
+  if (activeTilesetUrl && isLoading) {
+    return (
+      <div className="absolute bottom-4 left-4 z-50 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-slate-200 flex items-center gap-2">
+        <Loader2 className="w-4 h-4 text-violet-500 animate-spin" />
+        <span className="text-sm text-slate-700">Loading point cloud...</span>
+      </div>
+    );
+  }
+
+  // Show error if Cesium or loading fails
+  if (loadError) {
+    return (
+      <div className="absolute bottom-4 left-4 z-50 bg-red-50 rounded-lg px-3 py-2 shadow-lg border border-red-200">
+        <span className="text-sm text-red-700">{loadError}</span>
+      </div>
+    );
+  }
+
   return null;
 };
 
