@@ -58,6 +58,8 @@
   "errorFileType": "Apenas ficheiros .LAZ e .LAS sao aceites",
   "errorFileSize": "Ficheiro demasiado grande (max. 500MB)",
   "errorUpload": "Erro ao carregar ficheiro",
+  "errorMissingCrs": "Metadados CRS em falta. Introduza o EPSG de origem antes de carregar.",
+  "manualCrsLabel": "CRS de origem (obrigatório se o LAZ não tiver projeção)",
   "deleteLayer": "Eliminar camada",
   "deleteConfirm": "Tem a certeza de que pretende eliminar esta camada? Esta acao nao pode ser revertida.",
   "deleting": "A eliminar...",
@@ -88,5 +90,10 @@
   "tree.ndvi": "NDVI",
   "tree.location": "Localizacao",
   "tree.biomass": "Biomassa Estimada",
-  "tree.biomassApprox": "(aproximado)"
+  "tree.biomassApprox": "(aproximado)",
+  "cancelProcessing": "Cancelar processamento",
+  "errorNoGeometry": "A geometria da entidade é necessária para o download do PNOA.",
+  "loadingMetadata": "A carregar detalhes da entidade...",
+  "noParcelSelected": "Nenhuma parcela selecionada",
+  "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR."
 }

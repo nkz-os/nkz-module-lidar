@@ -9,12 +9,15 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
 
+from prometheus_client import Histogram
+
 from app.config import settings
+from app.main import limiter
 from app.middleware.auth import get_tenant_id, require_auth
 from app.services.lidar_pipeline import process_lidar_job, process_uploaded_file
 from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs
@@ -25,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 ALLOWED_CORS_ORIGINS = {o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()}
+
+# Prometheus metric: LiDAR processing job duration
+lidar_job_duration = Histogram(
+    'lidar_job_duration_seconds',
+    'Duration of LiDAR processing jobs',
+    buckets=[60, 300, 600, 1800, 3600, 7200]
+)
 
 
 # ============================================================================
@@ -106,38 +116,56 @@ def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
 # API Endpoints
 # ============================================================================
 
+@router.get("/health")
+async def router_health():
+    """Public health endpoint (reachable via ingress /api/lidar/health)."""
+    return {"status": "healthy", "module": "lidar", "version": "1.0.0"}
+
+
+@router.get("/metrics")
+async def router_metrics():
+    """Public Prometheus metrics (reachable via ingress /api/lidar/metrics)."""
+    from prometheus_client import generate_latest, REGISTRY
+    return PlainTextResponse(
+        content=generate_latest(REGISTRY).decode("utf-8"),
+        media_type="text/plain; version=0.0.4",
+    )
+
+
 @router.post("/process", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("5 per minute")
 async def start_processing(
-    request: ProcessRequest,
+    request: Request,
+    body: ProcessRequest,
     current_user: dict = Depends(require_auth),
     tenant_id: str = Depends(get_tenant_id)
 ):
     """
     Start LiDAR processing for a parcel.
-    
+
     This endpoint:
     1. Validates the parcel has LiDAR coverage
     2. Creates a processing job record
     3. Enqueues the job in Redis for worker processing
-    
+
     Returns immediately with job ID for status polling.
     """
-    logger.info(f"Processing request for parcel {request.parcel_id} by tenant {tenant_id}")
-    
+    logger.info(f"Processing request for parcel {body.parcel_id} by tenant {tenant_id}")
+
     # Check coverage first
     indexer = PNOAIndexer()
-    if not indexer.has_coverage(request.parcel_geometry_wkt):
+    if not indexer.has_coverage(body.parcel_geometry_wkt):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No LiDAR coverage available for this parcel"
         )
-    
+
     job_id = str(uuid4())
-    job_entity_id = get_orion_client(tenant_id).create_processing_job(
+    job_entity_id = await get_orion_client(tenant_id).create_processing_job(
         job_id=job_id,
-        parcel_id=request.parcel_id,
-        geometry_wkt=request.parcel_geometry_wkt,
-        config=request.config.model_dump(),
+        parcel_id=body.parcel_id,
+        geometry_wkt=body.parcel_geometry_wkt,
+        config=body.config.model_dump(),
         user_id=current_user.get("sub", "unknown"),
     )
     
@@ -150,12 +178,12 @@ async def start_processing(
             tenant_id,
             job_timeout=settings.WORKER_TIMEOUT
         )
-        get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+        await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
         logger.info(f"Job {job_entity_id} enqueued successfully (RQ: {rq_job.id})")
         
     except Exception as e:
         logger.error(f"Failed to enqueue job: {e}")
-        get_orion_client(tenant_id).update_job(
+        await get_orion_client(tenant_id).update_job(
             job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
         )
         raise HTTPException(
@@ -168,6 +196,43 @@ async def start_processing(
         status="queued",
         message="Processing job queued. Poll /status/{job_id} for updates."
     )
+
+
+@router.post("/process/{job_id}/cancel")
+async def cancel_processing(
+    job_id: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    Cancel a running or queued processing job.
+    """
+    entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
+    try:
+        job = await get_orion_client(tenant_id).get_job(entity_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = _prop(job, "status", "")
+    if status in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel job with status '{status}'"
+        )
+
+    # Remove from RQ queue if queued
+    if status in ("queued", "pending"):
+        try:
+            queue = get_redis_queue()
+            for rq_job in queue.get_jobs():
+                if rq_job.meta.get("job_entity_id") == entity_id:
+                    rq_job.cancel()
+                    break
+        except Exception as e:
+            logger.warning(f"Could not remove job from RQ queue: {e}")
+
+    await get_orion_client(tenant_id).cancel_job(entity_id)
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 @router.get("/status/{job_id}", response_model=JobStatusResponse)
@@ -183,7 +248,7 @@ async def get_job_status(
     """
     entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
     try:
-        job = get_orion_client(tenant_id).get_job(entity_id)
+        job = await get_orion_client(tenant_id).get_job(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -227,7 +292,7 @@ async def get_layers(
     """
     Get available point cloud layers for the tenant.
     """
-    layers = get_orion_client(tenant_id).list_assets(parcel_id=parcel_id)
+    layers = await get_orion_client(tenant_id).list_assets(parcel_id=parcel_id)
     return [
         LayerResponse(
             id=l.get("id", "").split(":")[-1],
@@ -252,7 +317,7 @@ async def get_layer(
     """
     entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        layer = get_orion_client(tenant_id).get_asset(entity_id)
+        layer = await get_orion_client(tenant_id).get_asset(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
 
@@ -274,19 +339,19 @@ async def delete_layer(
 ):
     """
     Delete a point cloud layer.
-    
+
     This also removes the tileset from storage.
     """
     entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
     try:
-        get_orion_client(tenant_id).get_asset(entity_id)
+        await get_orion_client(tenant_id).get_asset(entity_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Layer not found")
 
     from app.services.storage import storage_service
     prefix = layer_id
     storage_service.delete_prefix(prefix)
-    get_orion_client(tenant_id).delete_asset(entity_id)
+    await get_orion_client(tenant_id).delete_asset(entity_id)
 
     logger.info(f"Deleted layer {layer_id} for tenant {tenant_id}")
     
@@ -305,7 +370,7 @@ async def list_jobs(
     """
     List processing jobs for the tenant.
     """
-    jobs = get_orion_client(tenant_id).list_jobs(limit=limit, offset=offset)
+    jobs = await get_orion_client(tenant_id).list_jobs(limit=limit, offset=offset)
     if status_filter:
         jobs = [j for j in jobs if _prop(j, "status") == status_filter]
     if parcel_id:
@@ -330,7 +395,9 @@ async def list_jobs(
 
 
 @router.post("/upload", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("3 per minute")
 async def upload_laz_file(
+    request: Request,
     file: UploadFile = File(..., description="LAZ or LAS file to upload"),
     parcel_id: str = Form(..., description="Parcel entity ID"),
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
@@ -421,7 +488,7 @@ async def upload_laz_file(
             "source": "user_upload",
             "source_crs": source_crs,
         }
-        job_entity_id = get_orion_client(tenant_id).create_processing_job(
+        job_entity_id = await get_orion_client(tenant_id).create_processing_job(
             job_id=job_id,
             parcel_id=parcel_id,
             geometry_wkt=geometry_wkt,
@@ -441,15 +508,15 @@ async def upload_laz_file(
                 job_timeout=settings.WORKER_TIMEOUT
             )
             # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
-            get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+            await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
             logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
             
         except Exception as e:
             logger.error(f"Failed to enqueue upload job: {e}")
-            get_orion_client(tenant_id).update_job(
+            await get_orion_client(tenant_id).update_job(
                 job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
             )
-            
+
             # Cleanup temp file
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)

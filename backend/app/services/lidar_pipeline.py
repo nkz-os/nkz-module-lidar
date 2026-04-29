@@ -61,7 +61,7 @@ class LidarPipeline:
         Initialize the pipeline.
         
         Args:
-            job_id: UUID of the LidarProcessingJob
+            job_id: UUID of the Orion-LD DataProcessingJob
             work_dir: Optional working directory (temp dir created if not provided)
         """
         self.job_id = job_id
@@ -101,7 +101,7 @@ class LidarPipeline:
         }
         if status in ("completed", "failed"):
             updates["completedAt"] = datetime.utcnow().isoformat() + "Z"
-        get_orion_client(self.tenant_id).update_job(self.job_id, **updates)
+        get_orion_client(self.tenant_id).update_job_sync(self.job_id, **updates)
     
     def process(
         self,
@@ -604,12 +604,12 @@ class LidarPipeline:
         Create Orion-LD entities for the processed data.
         
         Creates:
-        - PointCloudLayer entity for the tileset
+        - DigitalAsset entity for the tileset
         - AgriTree entities for detected trees (if any)
         """
         client = get_orion_client(self.tenant_id)
         asset_id = self.job_id.split(":")[-1]
-        client.create_digital_asset(
+        client.create_digital_asset_sync(
             asset_id=asset_id,
             parcel_id=self.parcel_id,
             tileset_url=tileset_url,
@@ -709,11 +709,11 @@ def process_lidar_job(job_entity_id: str, tenant_id: str):
     This function is called by the RQ worker.
     
     Args:
-        job_id: UUID of the LidarProcessingJob to process
+        job_id: UUID of the Orion-LD DataProcessingJob to process
     """
     logger.info("Worker starting job: %s", job_entity_id)
     client = get_orion_client(tenant_id)
-    job = client.get_job(job_entity_id)
+    job = client.get_job_sync(job_entity_id)
     parcel_urn = job.get("refAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     geometry_wkt = job.get("parcelGeometryWKT", {}).get("value", "")
@@ -735,13 +735,13 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     This function is called by the RQ worker for user-uploaded files.
     
     Args:
-        job_id: UUID of the LidarProcessingJob
+        job_id: UUID of the Orion-LD DataProcessingJob
         file_path: S3 key of the uploaded LAZ/LAS file in lidar-source-tiles
         geometry_wkt: Optional WKT for cropping (if None, use entire file)
     """
     logger.info("Worker starting upload job: %s (file key: %s)", job_entity_id, file_path)
     client = get_orion_client(tenant_id)
-    job = client.get_job(job_entity_id)
+    job = client.get_job_sync(job_entity_id)
     parcel_urn = job.get("refAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     config = job.get("config", {}).get("value", {}) or {}
