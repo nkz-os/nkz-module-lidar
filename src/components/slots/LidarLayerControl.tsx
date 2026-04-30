@@ -121,6 +121,10 @@ const LidarLayerControl: React.FC = () => {
   const [uploadJobStatus, setUploadJobStatus] = useState<{ progress: number; message: string } | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; filename: string; size_bytes: number }>>([]);
   const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
+  const [classificationMode, setClassificationMode] = useState<'native' | 'auto' | 'detect'>('detect');
+  const [hasRgb, setHasRgb] = useState(true);
+  const [showUploadOptions, setShowUploadOptions] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -209,17 +213,15 @@ const LidarLayerControl: React.FC = () => {
       return;
     }
 
-    setIsUploading(true);
     setErrorWithTimeout(null);
 
     try {
-      // Lazy load worker or handle potential failure
+      // Parse LAZ header for CRS
       const parserWorker = new LazWorker();
       const headerInfo: LazHeaderParseResult = await new Promise((resolve, reject) => {
         parserWorker.onmessage = (ev) => resolve(ev.data as LazHeaderParseResult);
         parserWorker.onerror = (err) => reject(err);
         parserWorker.postMessage({ file });
-        // Fail-safe timeout for worker
         setTimeout(() => reject(new Error('Worker timeout')), 5000);
       });
       parserWorker.terminate();
@@ -229,44 +231,12 @@ const LidarLayerControl: React.FC = () => {
         throw new Error(t('errorMissingCrs'));
       }
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('parcel_id', selectedEntityId || 'unknown');
-      if (selectedEntityGeometry) {
-        formData.append('geometry_wkt', selectedEntityGeometry);
-      }
-      formData.append('config', JSON.stringify(processingConfig));
-      if (manualCrs.trim()) {
-        formData.append('source_crs', manualCrs.trim());
-      }
-
-      const uploadResponse = await lidarApi.uploadFile(formData);
-
-      // Poll until job completes (same flow as PNOA download)
-      const finalStatus = await lidarApi.pollJobStatus(
-        uploadResponse.job_id,
-        (status) => {
-          setUploadJobStatus({ progress: status.progress, message: status.status_message || '' });
-        },
-        2000,
-        300,
-      );
-
-      if (finalStatus.tileset_url) {
-        await refreshLayers();
-      }
-      setUploadJobStatus(null);
-      setRequiresManualCrs(false);
-      setManualCrs('');
+      // Store file and show classification options modal
+      setPendingFile(file);
+      setShowUploadOptions(true);
     } catch (error: unknown) {
-      setUploadJobStatus(null);
       const msg = error instanceof Error ? error.message : t('errorUpload');
       setErrorWithTimeout(msg);
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
@@ -301,6 +271,43 @@ const LidarLayerControl: React.FC = () => {
     } finally {
       setDeletingLayerId(null);
       setConfirmDeleteId(null);
+    }
+  };
+
+  const doUpload = async () => {
+    if (!pendingFile) return;
+    const file = pendingFile;
+    setShowUploadOptions(false);
+    setPendingFile(null);
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('parcel_id', selectedEntityId || 'unknown');
+      if (selectedEntityGeometry) formData.append('geometry_wkt', selectedEntityGeometry);
+      formData.append('config', JSON.stringify(processingConfig));
+      formData.append('classification_mode', classificationMode);
+      if (hasRgb) formData.append('has_rgb', 'true');
+      if (manualCrs.trim()) formData.append('source_crs', manualCrs.trim());
+
+      const uploadResponse = await lidarApi.uploadFile(formData);
+      const finalStatus = await lidarApi.pollJobStatus(
+        uploadResponse.job_id,
+        (status) => setUploadJobStatus({ progress: status.progress, message: status.status_message || '' }),
+        2000, 300,
+      );
+      if (finalStatus.tileset_url) await refreshLayers();
+      setUploadJobStatus(null);
+      setRequiresManualCrs(false);
+      setManualCrs('');
+    } catch (error: unknown) {
+      setUploadJobStatus(null);
+      const msg = error instanceof Error ? error.message : t('errorUpload');
+      setErrorWithTimeout(msg);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -734,6 +741,46 @@ const LidarLayerControl: React.FC = () => {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Upload Classification Modal */}
+        {showUploadOptions && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowUploadOptions(false); setPendingFile(null); }}>
+            <div className="bg-white rounded-xl p-5 shadow-xl max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-semibold text-slate-800 mb-3">{t('uploadClassification')}</h3>
+
+              <label className="flex items-center gap-2 mb-2 text-sm cursor-pointer">
+                <input type="radio" name="classMode" value="native" checked={classificationMode === 'native'}
+                  onChange={() => setClassificationMode('native')} />
+                {t('classificationNative')}
+              </label>
+              <label className="flex items-center gap-2 mb-2 text-sm cursor-pointer">
+                <input type="radio" name="classMode" value="auto" checked={classificationMode === 'auto'}
+                  onChange={() => setClassificationMode('auto')} />
+                {t('classificationAuto')}
+              </label>
+              <label className="flex items-center gap-2 mb-4 text-sm cursor-pointer">
+                <input type="radio" name="classMode" value="detect" checked={classificationMode === 'detect'}
+                  onChange={() => setClassificationMode('detect')} />
+                {t('classificationDetect')}
+              </label>
+
+              <label className="flex items-center gap-2 mb-4 text-sm cursor-pointer">
+                <input type="checkbox" checked={hasRgb} onChange={(e) => setHasRgb(e.target.checked)} />
+                {t('hasRgb')}
+              </label>
+
+              <div className="flex gap-2">
+                <button onClick={doUpload} className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium">
+                  {t('continue')}
+                </button>
+                <button onClick={() => { setShowUploadOptions(false); setPendingFile(null); }}
+                  className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm">
+                  {t('cancel')}
+                </button>
+              </div>
             </div>
           </div>
         )}
