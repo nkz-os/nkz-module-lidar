@@ -31,6 +31,36 @@ import { lidarApi } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
 
+const LEGENDS: Record<string, Array<{ color: string; label: string }>> = {
+  height: [
+    { color: '#0000ff', label: '0m' },
+    { color: '#00ff00', label: '25m' },
+    { color: '#ff0000', label: '50m+' },
+  ],
+  classification: [
+    { color: '#8B5E3C', label: 'Suelo' },
+    { color: '#00B31A', label: 'Vegetación' },
+    { color: '#B3B3B3', label: 'Edificio' },
+  ],
+  heightAboveGround: [
+    { color: '#8B5E3C', label: '0m' },
+    { color: '#FFFF00', label: '1m' },
+    { color: '#00FF00', label: '3m' },
+    { color: '#FF0000', label: '5m+' },
+  ],
+  canopyCover: [
+    { color: '#33CC33', label: 'Cubierta' },
+    { color: '#006B00', label: 'Copa' },
+    { color: '#8B5E3C', label: 'Suelo' },
+  ],
+  verticalDensity: [
+    { color: '#0000ff', label: 'Baja' },
+    { color: '#ffff00', label: 'Media' },
+    { color: '#ff0000', label: 'Alta' },
+  ],
+  rgb: [],
+};
+
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
   const context = useLidarContext();
@@ -492,6 +522,17 @@ const LidarLayerControl: React.FC = () => {
                   </button>
                 ))}
               </div>
+
+              {LEGENDS[colorMode] && LEGENDS[colorMode].length > 0 && (
+                <div className="flex gap-2 mt-2 text-[10px] text-slate-500">
+                  {LEGENDS[colorMode].map((item, i) => (
+                    <span key={i} className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: item.color }} />
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Height offset slider */}
