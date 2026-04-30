@@ -39,27 +39,27 @@ interface LidarLayerProps {
 
 // Color ramps for different visualization modes
 const COLOR_RAMPS: Record<string, string> = {
-  // Height: Blue (low) -> Green -> Yellow -> Red (high)
+  // Height: Blue (low) → Cyan → Green → Yellow → Red (high)
   height: `
-    var height = \${POSITION}[2];
-    var normalized = clamp((height - 0.0) / 50.0, 0.0, 1.0);
-    color(
-      mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), normalized),
-      1.0
-    )
+    float t = clamp((${POSITION}[2] - 0.0) / 50.0, 0.0, 1.0);
+    float r = t < 0.5 ? 0.0 : (t - 0.5) * 2.0;
+    float g = t < 0.5 ? t * 2.0 : 2.0 - t * 2.0;
+    float b = 1.0 - t;
+    color(r, g, b, 1.0)
   `,
 
-  // NDVI: Red (unhealthy) -> Yellow -> Green (healthy)
+  // NDVI: Red (unhealthy) → Yellow → Green (healthy)
   ndvi: `
-    var ndvi = \${NDVI};
-    var r = (ndvi < 0.5) ? 1.0 : (1.0 - ndvi) * 2.0;
-    var g = (ndvi > 0.5) ? 1.0 : ndvi * 2.0;
+    float ndvi = clamp(${NDVI}, -1.0, 1.0);
+    float r = clamp(1.0 - ndvi, 0.0, 1.0);
+    float g = clamp(ndvi, 0.0, 1.0);
     color(r, g, 0.0, 1.0)
   `,
 
-  // RGB: Use original point colors
+  // RGB: True color from point cloud
   rgb: `
-    color(\${COLOR})
+    vec4 c = ${COLOR};
+    color(c.r, c.g, c.b, 1.0)
   `,
 
   // Classification: Standard LiDAR classification colors
