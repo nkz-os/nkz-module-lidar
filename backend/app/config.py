@@ -44,9 +44,21 @@ class Settings(BaseSettings):
     GEOBBOX_BUFFER_KM: float = 20.0
     EUROPE_BOUNDS_GEOJSON_PATH: str = "/app/data/eu_uk_bounds.geojson"
     
+    # Processing settings
+    DEFAULT_TREE_MIN_HEIGHT: float = 2.0  # meters
+    DEFAULT_TREE_SEARCH_RADIUS: float = 3.0  # meters
+    GEOBBOX_BUFFER_KM: float = 20.0
+    # Adaptive downsampling guardrail to avoid py3dtiles worker OOM/SIGKILL on very dense clouds.
+    # 0 disables the guard.
+    MAX_POINTS_BEFORE_TILING_DECIMATION: int = 4_000_000
+    # Target point budget after decimation when guardrail is triggered.
+    TILING_TARGET_POINTS: int = 2_500_000
+
     # Worker settings
     WORKER_QUEUE_NAME: str = "lidar-processing"
     WORKER_TIMEOUT: int = 1800  # 30 minutes max per job
+    # External converter timeout (py3dtiles). Keep below/near worker timeout guardrail.
+    PY3DTILES_TIMEOUT: int = 5400  # 90 minutes
 
     # Security
     CORS_ORIGINS: str = "http://localhost:3000"

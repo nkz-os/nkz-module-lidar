@@ -538,6 +538,9 @@ class LidarPipeline:
         except (laspy.LaspyError, OSError) as e:
             raise ValueError(f"Cannot read source LAZ file for tiling: {e}")
 
+        # Adaptive decimation guardrail: prevent OOM on dense clouds
+        source_laz = self._prepare_tiling_input(source_laz)
+
         # Use py3dtiles command line (more reliable than Python API for large files)
         # Resolve full path - subprocess may not inherit conda PATH
         py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
@@ -553,7 +556,7 @@ class LidarPipeline:
         env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
         env["PROJ_DATA"] = env.get("PROJ_DATA", "/opt/conda/share/proj")
         env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=settings.PY3DTILES_TIMEOUT, env=env)
         
         if result.returncode != 0:
             logger.error(f"py3dtiles failed: {result.stderr}")
@@ -575,6 +578,56 @@ class LidarPipeline:
         )
         return tileset_url
     
+    def _prepare_tiling_input(self, source_laz: str) -> str:
+        """
+        Apply adaptive decimation before heavy tiling when clouds are too large.
+
+        This is a deterministic guardrail against work-horse SIGKILL/OOM during
+        py3dtiles conversion. It only activates above a configurable threshold.
+        """
+        max_points = settings.MAX_POINTS_BEFORE_TILING_DECIMATION
+        target_points = max(settings.TILING_TARGET_POINTS, 1)
+        if max_points <= 0:
+            return source_laz
+
+        try:
+            with laspy.open(source_laz) as f:
+                point_count = int(f.header.point_count or 0)
+        except Exception as exc:
+            logger.warning("Could not read point count before tiling: %s", exc)
+            return source_laz
+
+        if point_count <= max_points:
+            return source_laz
+
+        step = max(2, math.ceil(point_count / target_points))
+        decimated_laz = os.path.join(self.work_dir, "tiling_input_decimated.laz")
+        logger.warning(
+            "Adaptive decimation enabled for tiling: %s -> target~%s points (step=%s)",
+            point_count,
+            target_points,
+            step,
+        )
+
+        pipeline = pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "filters.decimation", "step": step},
+                {"type": "writers.las", "filename": decimated_laz, "compression": "laszip"},
+            ]
+        }))
+        reduced_count = pipeline.execute()
+        if reduced_count <= 0:
+            raise RuntimeError(
+                "Adaptive decimation produced 0 points; refusing to continue tiling."
+            )
+        logger.info(
+            "Adaptive decimation complete: %s -> %s points",
+            point_count,
+            reduced_count,
+        )
+        return decimated_laz
+
     def _count_points(self) -> int:
         """Count points in the processed file."""
         source = self.reprojected_laz or self.colored_laz or self.cropped_laz
