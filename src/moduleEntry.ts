@@ -7,9 +7,18 @@
 
 import { lidarSlots } from './slots/index';
 
-// Import CSS so it's inlined in the IIFE bundle (also imports App for side effects)
+// Import App for side effects (registers React components)
 import './App';
 import './index.css';
+
+// Inject stylesheet — Vite extracts CSS to a separate file for IIFE builds,
+// so we must explicitly link it from the same MinIO path as the JS bundle.
+(function() {
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = '/modules/lidar/style.css';
+  document.head.appendChild(link);
+})();
 
 console.log('[nkz-module-lidar] 🟢 Bundle loaded v1.1.0');
 
