@@ -96,5 +96,7 @@
   "loadingMetadata": "Entitatearen xehetasunak kargatzen...",
   "processingOptionsHint": "Deskarga edo igoera berri bat hastean aplikatzen da",
 "heightOffset": "Altuera doikuntza",
+"cancelProcessing": "Prozesamendua utzi",
+"uploadedFiles": "Igotako Fitxategiak",
 "errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
 }

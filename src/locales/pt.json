@@ -93,6 +93,7 @@
   "tree.biomassApprox": "(aproximado)",
   "processingOptionsHint": "Aplicado ao iniciar um novo download ou upload",
 "heightOffset": "Ajuste de altura",
+"uploadedFiles": "Ficheiros Carregados",
 "cancelProcessing": "Cancelar processamento",
   "errorNoGeometry": "A geometria da entidade é necessária para o download do PNOA.",
   "loadingMetadata": "A carregar detalhes da entidade...",

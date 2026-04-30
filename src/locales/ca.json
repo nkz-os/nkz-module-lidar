@@ -93,6 +93,7 @@
   "tree.biomassApprox": "(aproximat)",
   "processingOptionsHint": "S'aplica en iniciar una nova descàrrega o pujada",
 "heightOffset": "Ajust d'alçada",
+"uploadedFiles": "Fitxers Pujats",
 "cancelProcessing": "Cancel·lar processament",
   "errorNoGeometry": "Es requereix la geometria de l'entitat per a la descàrrega del PNOA.",
   "loadingMetadata": "Carregant detalls de l'entitat...",
