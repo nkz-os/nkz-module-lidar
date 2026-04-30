@@ -5,10 +5,10 @@
  * The host wraps all slot widgets with the moduleProvider (LidarProvider).
  */
 
-import LidarApp from './App';
 import { lidarSlots } from './slots/index';
 
-// Import CSS so it's inlined in the IIFE bundle
+// Import CSS so it's inlined in the IIFE bundle (also imports App for side effects)
+import './App';
 import './index.css';
 
 const NKZ = (window as any).__NKZ__;

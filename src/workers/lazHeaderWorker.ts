@@ -54,10 +54,10 @@ self.onmessage = async (event: MessageEvent<{ file: File }>) => {
     const slice = file.slice(0, Math.min(file.size, 2 * 1024 * 1024));
     const buffer = await slice.arrayBuffer();
     const result = parseLasHeader(buffer);
-    (self as DedicatedWorkerGlobalScope).postMessage(result);
+    ((self as unknown as { postMessage: (msg: LazHeaderParseResult) => void })).postMessage(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown parse error";
-    (self as DedicatedWorkerGlobalScope).postMessage({
+    ((self as unknown as { postMessage: (msg: LazHeaderParseResult) => void })).postMessage({
       hasProjectionVlr: false,
       vlrCount: 0,
       error: message,

@@ -124,7 +124,7 @@ const LidarLayerControl: React.FC = () => {
 
   const handleStartProcessing = async () => {
     if (!selectedEntityGeometry) {
-      setErrorWithTimeout(t('errorNoGeometry', 'Entity geometry is required for PNOA download.'));
+      setErrorWithTimeout(t('errorNoGeometry'));
       return;
     }
     try {
@@ -240,8 +240,8 @@ const LidarLayerControl: React.FC = () => {
           <Layers className="w-8 h-8 text-violet-400" />
         </div>
         <div>
-          <p className="text-sm font-semibold text-slate-700">{t('noParcelSelected', 'No parcel selected')}</p>
-          <p className="text-xs text-slate-500 mt-1">{t('selectParcelToUpload', 'Select a parcel from the map to upload or download LiDAR data.')}</p>
+          <p className="text-sm font-semibold text-slate-700">{t('noParcelSelected')}</p>
+          <p className="text-xs text-slate-500 mt-1">{t('selectParcelToUpload')}</p>
         </div>
       </div>
     );
@@ -251,7 +251,7 @@ const LidarLayerControl: React.FC = () => {
     return (
       <div className="lidar-module p-4 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 flex flex-col items-center justify-center gap-3 min-h-[200px]">
         <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
-        <p className="text-sm text-slate-500 font-medium">{t('loadingMetadata', 'Loading entity details...')}</p>
+        <p className="text-sm text-slate-500 font-medium">{t('loadingMetadata')}</p>
       </div>
     );
   }

@@ -20,7 +20,7 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
 const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
   const {
-    selectedEntityId,
+    selectedEntityId: _selectedEntityId,
     activeTilesetUrl,
     setActiveTilesetUrl,
     layers,
@@ -29,7 +29,7 @@ const LidarLayerToggle: React.FC = () => {
     colorMode,
     setColorMode,
     isProcessing,
-    hasCoverage,
+    hasCoverage: _hasCoverage,
   } = useLidarContext();
 
   const handleToggle = () => {

@@ -115,8 +115,8 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const viewer = useViewer();
   
   // Local state for selected entity to ensure reactivity via events
-  const [selectedEntityId, setSelectedEntityIdState] = useState<string | null>(viewer.selectedEntityId);
-  const [selectedEntityType, setSelectedEntityTypeState] = useState<string | null>(viewer.selectedEntityType);
+  const [_selectedEntityId, setSelectedEntityIdState] = useState<string | null>(viewer.selectedEntityId);
+  const [_selectedEntityType, setSelectedEntityTypeState] = useState<string | null>(viewer.selectedEntityType);
 
   // Sync with global events (Direct connection)
   useEffect(() => {
