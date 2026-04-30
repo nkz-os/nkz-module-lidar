@@ -176,33 +176,57 @@ class StorageService:
         tileset_key = f"{prefix}/tileset.json".replace("\\", "/")
         return self.get_public_url(tileset_key)
     
-    def delete_prefix(self, prefix: str) -> int:
+    def delete_prefix(self, prefix: str, bucket: str = None) -> int:
         """
         Delete all objects under a prefix (folder).
-        
+
         Args:
             prefix: S3 prefix to delete
-        
+            bucket: Optional bucket name (defaults to self.bucket)
+
         Returns:
             Number of objects deleted
         """
+        target_bucket = bucket or self.bucket
         paginator = self.client.get_paginator('list_objects_v2')
-        
+
         deleted_count = 0
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+        for page in paginator.paginate(Bucket=target_bucket, Prefix=prefix):
             if 'Contents' not in page:
                 continue
-            
+
             objects = [{'Key': obj['Key']} for obj in page['Contents']]
             if objects:
                 self.client.delete_objects(
-                    Bucket=self.bucket,
+                    Bucket=target_bucket,
                     Delete={'Objects': objects}
                 )
                 deleted_count += len(objects)
-        
+
         logger.info(f"Deleted {deleted_count} objects from {prefix}")
         return deleted_count
+
+    def list_objects(self, bucket: str, prefix: str) -> list:
+        """
+        List objects under a prefix in a bucket.
+
+        Args:
+            bucket: Bucket name
+            prefix: S3 prefix to list
+
+        Returns:
+            List of dicts with key, size, last_modified
+        """
+        paginator = self.client.get_paginator('list_objects_v2')
+        results = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                results.append({
+                    "key": obj["Key"],
+                    "size": obj["Size"],
+                    "last_modified": str(obj["LastModified"]),
+                })
+        return results
     
     def get_public_url(self, key: str) -> str:
         """Get the public URL for an object."""

@@ -354,8 +354,52 @@ async def delete_layer(
     await get_orion_client(tenant_id).delete_asset(entity_id)
 
     logger.info(f"Deleted layer {layer_id} for tenant {tenant_id}")
-    
+
     return {"status": "deleted", "layer_id": layer_id}
+
+
+@router.get("/uploads")
+async def list_uploads(
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    List uploaded source .LAZ/.LAS files for the tenant.
+    """
+    from app.services.storage import storage_service
+
+    prefix = f"user_uploads/{tenant_id}/"
+    objects = storage_service.list_objects("lidar-source-tiles", prefix)
+    uploads = [
+        {
+            "id": obj["key"].split("/")[-2],
+            "filename": obj["key"].split("/")[-1],
+            "key": obj["key"],
+            "size_bytes": obj.get("size", 0),
+            "last_modified": obj.get("last_modified", ""),
+        }
+        for obj in objects
+        if obj["key"].endswith((".laz", ".las"))
+    ]
+    return {"uploads": uploads, "total": len(uploads)}
+
+
+@router.delete("/uploads/{upload_id}")
+async def delete_upload(
+    upload_id: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    Delete an uploaded source file.
+    """
+    from app.services.storage import storage_service
+
+    prefix = f"user_uploads/{tenant_id}/{upload_id}/"
+    deleted = storage_service.delete_prefix(prefix, bucket="lidar-source-tiles")
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return {"status": "deleted", "upload_id": upload_id, "objects_deleted": deleted}
 
 
 @router.get("/jobs")

@@ -86,6 +86,9 @@ const LidarLayerControl: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manualCrs, setManualCrs] = useState('');
   const [requiresManualCrs, setRequiresManualCrs] = useState(false);
+  const [uploadJobStatus, setUploadJobStatus] = useState<{ progress: number; message: string } | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; filename: string; size_bytes: number }>>([]);
+  const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -117,6 +120,30 @@ const LidarLayerControl: React.FC = () => {
       checkCoverage();
     }
   }, [selectedEntityGeometry, hasCoverage, checkCoverage]);
+
+  // Fetch uploaded files list on mount
+  const fetchUploads = useCallback(async () => {
+    try {
+      const result = await lidarApi.listUploads();
+      setUploadedFiles(result.uploads);
+    } catch {
+      // silently fail — uploads list is non-critical
+    }
+  }, []);
+
+  useEffect(() => { fetchUploads(); }, [fetchUploads]);
+
+  const handleDeleteUpload = async (uploadId: string) => {
+    setDeletingUploadId(uploadId);
+    try {
+      await lidarApi.deleteUpload(uploadId);
+      setUploadedFiles(prev => prev.filter(f => f.id !== uploadId));
+    } catch {
+      // silently fail
+    } finally {
+      setDeletingUploadId(null);
+    }
+  };
 
   // =========================================================================
   // Handlers
@@ -179,12 +206,26 @@ const LidarLayerControl: React.FC = () => {
         formData.append('source_crs', manualCrs.trim());
       }
 
-      await lidarApi.uploadFile(formData);
+      const uploadResponse = await lidarApi.uploadFile(formData);
 
-      await refreshLayers();
+      // Poll until job completes (same flow as PNOA download)
+      const finalStatus = await lidarApi.pollJobStatus(
+        uploadResponse.job_id,
+        (status) => {
+          setUploadJobStatus({ progress: status.progress, message: status.status_message || '' });
+        },
+        2000,
+        300,
+      );
+
+      if (finalStatus.tileset_url) {
+        await refreshLayers();
+      }
+      setUploadJobStatus(null);
       setRequiresManualCrs(false);
       setManualCrs('');
     } catch (error: unknown) {
+      setUploadJobStatus(null);
       const msg = error instanceof Error ? error.message : t('errorUpload');
       setErrorWithTimeout(msg);
     } finally {
@@ -394,6 +435,27 @@ const LidarLayerControl: React.FC = () => {
           </div>
         )}
 
+        {/* Upload Processing Status */}
+        {isUploading && uploadJobStatus && (
+          <div className="p-4 rounded-xl bg-gradient-to-br from-violet-50 to-cyan-50 border border-violet-200 lidar-pulse lidar-slide-in">
+            <div className="flex items-center gap-2 mb-3">
+              <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
+              <span className="text-sm font-semibold text-violet-900">
+                {t('processing')}
+              </span>
+            </div>
+            <div className="lidar-progress mb-2">
+              <div
+                className="lidar-progress-bar"
+                style={{ width: `${uploadJobStatus.progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-violet-700">
+              {uploadJobStatus.message || t('processingPointCloud')}
+            </p>
+          </div>
+        )}
+
         {/* Error Display */}
         {uploadError && (
           <div className="lidar-status lidar-status-error lidar-slide-in">
@@ -575,6 +637,36 @@ const LidarLayerControl: React.FC = () => {
                       </div>
                     </div>
                   )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Uploaded Files */}
+        {uploadedFiles.length > 0 && (
+          <div className="pt-4 border-t border-slate-100">
+            <h4 className="lidar-label mb-3 flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              {t('uploadedFiles')}
+            </h4>
+            <div className="space-y-1 max-h-32 overflow-y-auto lidar-scrollbar">
+              {uploadedFiles.map((f) => (
+                <div key={f.id} className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-slate-50">
+                  <span className="text-slate-600 truncate flex-1">{f.filename}</span>
+                  <span className="text-slate-400 mx-2">{(f.size_bytes / 1048576).toFixed(1)} MB</span>
+                  <button
+                    onClick={() => handleDeleteUpload(f.id)}
+                    disabled={deletingUploadId === f.id}
+                    className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                    title={t('deleteLayer')}
+                  >
+                    {deletingUploadId === f.id ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3" />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

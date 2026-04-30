@@ -282,6 +282,23 @@ class LidarApiClient {
     // --------------------------------------------------------------------------
 
     /**
+     * List uploaded source files for the tenant
+     */
+    async listUploads(): Promise<{
+        uploads: Array<{ id: string; filename: string; key: string; size_bytes: number; last_modified: string }>;
+        total: number;
+    }> {
+        return this.request('/uploads');
+    }
+
+    /**
+     * Delete an uploaded source file
+     */
+    async deleteUpload(uploadId: string): Promise<void> {
+        return this.request(`/uploads/${uploadId}`, { method: 'DELETE' });
+    }
+
+    /**
      * List processing jobs
      */
     async listJobs(options?: {
