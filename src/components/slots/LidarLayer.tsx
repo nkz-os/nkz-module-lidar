@@ -18,6 +18,21 @@ import { Loader2 } from 'lucide-react';
 type CesiumViewerType = any;
 type CesiumTilesetType = any;
 
+/**
+ * Get the Cesium viewer from the host's ViewerContext.
+ * The host exposes window.__nekazariViewerContextInstance which holds cesiumViewer.
+ * This is the canonical way for IIFE modules to access the Cesium viewer.
+ */
+function useCesiumViewer(): CesiumViewerType | null {
+  try {
+    const React = (window as any).React;
+    const ctx = React.useContext((window as any).__nekazariViewerContextInstance);
+    return ctx?.cesiumViewer ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface LidarLayerProps {
   viewer?: CesiumViewerType;
 }
@@ -64,11 +79,15 @@ const COLOR_RAMPS: Record<string, string> = {
   `,
 };
 
-export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
+export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) => {
   const { activeTilesetUrl, colorMode } = useLidarContext();
   const tilesetRef = useRef<CesiumTilesetType | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
+  const contextViewer = useCesiumViewer();
+  const viewer = viewerProp || contextViewer;
 
   /**
    * Create style expression for current color mode
@@ -93,11 +112,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
    * Load 3D Tiles tileset
    */
   useEffect(() => {
-    if (!viewer) return;
+    console.log('[LidarLayer] viewer:', !!viewer, 'url:', activeTilesetUrl);
+    if (!viewer) { console.warn('[LidarLayer] No viewer prop'); return; }
 
     // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
     if (!Cesium) {
+      console.warn('[LidarLayer] Cesium not available');
       setLoadError('CesiumJS not available');
       return;
     }
@@ -109,11 +130,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
     }
 
     if (!activeTilesetUrl) {
+      console.log('[LidarLayer] No active tileset URL');
       setIsLoading(false);
       setLoadError(null);
       return;
     }
 
+    console.log('[LidarLayer] Loading:', activeTilesetUrl.substring(0, 80) + '...');
     setIsLoading(true);
 
     const loadTileset = async () => {
