@@ -80,7 +80,7 @@ const COLOR_RAMPS: Record<string, string> = {
 };
 
 export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) => {
-  const { activeTilesetUrl, colorMode } = useLidarContext();
+  const { activeTilesetUrl, colorMode, heightOffset } = useLidarContext();
   const tilesetRef = useRef<CesiumTilesetType | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -154,6 +154,23 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
           tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, options);
         } else {
           tileset = new Cesium.Cesium3DTileset({ url: activeTilesetUrl, ...options });
+        }
+
+        // Apply height offset to compensate for orthometric→ellipsoidal datum difference
+        if (heightOffset !== 0 && tileset.boundingSphere) {
+          try {
+            const center = tileset.boundingSphere.center;
+            const cartographic = Cesium.Cartographic.fromCartesian(center);
+            const offsetCenter = Cesium.Cartesian3.fromRadians(
+              cartographic.longitude,
+              cartographic.latitude,
+              cartographic.height + heightOffset
+            );
+            const translation = Cesium.Cartesian3.subtract(offsetCenter, center, new Cesium.Cartesian3());
+            tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation);
+          } catch (e) {
+            console.warn('[LidarLayer] Could not apply height offset:', e);
+          }
         }
 
         // Add to scene

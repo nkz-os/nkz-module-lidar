@@ -78,6 +78,8 @@ interface LidarContextType {
   setColorMode: (mode: ColorMode) => void;
   showTrees: boolean;
   setShowTrees: (show: boolean) => void;
+  heightOffset: number;
+  setHeightOffset: (offset: number) => void;
 
   // Processing
   isProcessing: boolean;
@@ -155,6 +157,11 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     () => lidarStore.showTrees
   );
 
+  const heightOffset = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.heightOffset
+  );
+
   const setSelectedLayerId = useCallback((id: string | null) => {
     lidarStore.setLayerState(id, lidarStore.activeTilesetUrl);
   }, []);
@@ -169,6 +176,10 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setShowTrees = useCallback((show: boolean) => {
     lidarStore.setShowTrees(show);
+  }, []);
+
+  const setHeightOffset = useCallback((offset: number) => {
+    lidarStore.setHeightOffset(offset);
   }, []);
 
   const layers = useSyncExternalStore(
@@ -276,6 +287,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       // Auto-select first layer if available
       if (fetchedLayers.length > 0 && !selectedLayerId) {
+        console.log('[LidarContext] Auto-activating layer:', fetchedLayers[0].id, 'url:', fetchedLayers[0].tileset_url);
         setSelectedLayerId(fetchedLayers[0].id);
         setActiveTilesetUrl(fetchedLayers[0].tileset_url);
       }
@@ -461,6 +473,8 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setColorMode: setColorModeWithSync,
         showTrees,
         setShowTrees,
+        heightOffset,
+        setHeightOffset,
         isProcessing,
         processingJob,
         processingConfig,

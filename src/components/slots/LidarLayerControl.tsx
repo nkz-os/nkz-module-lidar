@@ -65,6 +65,8 @@ const LidarLayerControl: React.FC = () => {
     activeTilesetUrl,
     colorMode,
     setColorMode,
+    heightOffset,
+    setHeightOffset,
     isProcessing,
     processingJob,
     processingConfig,
@@ -330,6 +332,7 @@ const LidarLayerControl: React.FC = () => {
               <Sparkles className="w-4 h-4 text-violet-500" />
               {t('processingOptions')}
             </h4>
+            <p className="text-xs text-slate-500 -mt-2">{t('processingOptionsHint')}</p>
 
             {/* Color Mode */}
             <div>
@@ -486,6 +489,25 @@ const LidarLayerControl: React.FC = () => {
                     {opt.icon} {opt.label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Height offset slider */}
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <label className="text-xs text-slate-500 flex items-center justify-between">
+                <span>{t('heightOffset')}: {heightOffset > 0 ? '+' : ''}{heightOffset}m</span>
+              </label>
+              <input
+                type="range"
+                min={-100}
+                max={20}
+                step={1}
+                value={heightOffset}
+                onChange={(e) => setHeightOffset(parseInt(e.target.value))}
+                className="w-full h-1.5 mt-1 accent-violet-500"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>-100m</span><span>0m</span><span>+20m</span>
               </div>
             </div>
 

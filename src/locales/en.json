@@ -95,6 +95,8 @@
   "selectParcelToUpload": "Select a parcel from the map to upload or download LiDAR data.",
   "loadingMetadata": "Loading entity details...",
   "errorNoGeometry": "Entity geometry is required for PNOA download.",
-  "cancelProcessing": "Cancel processing",
+  "processingOptionsHint": "Applied when starting a new download or upload",
+"heightOffset": "Height offset",
+"cancelProcessing": "Cancel processing",
 "uploadedFiles": "Uploaded Files"
 }
