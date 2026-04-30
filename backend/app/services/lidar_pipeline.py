@@ -12,6 +12,7 @@ NOT within the API process.
 """
 
 import logging
+import math
 import os
 import tempfile
 import shutil
