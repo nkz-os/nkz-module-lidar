@@ -289,11 +289,10 @@ class LidarPipeline:
             pdal.Pipeline(json.dumps(hag_pipeline)).execute()
             logger.info("Auto-classification and HAG complete")
         else:
-            # Already classified — just run HAG
+            # Already classified — just run HAG (smrf is not needed and may fail on some LAS files)
             hag_pipeline = {
                 "pipeline": [
                     {"type": "readers.las", "filename": self.cropped_laz},
-                    {"type": "filters.smrf"},
                     {"type": "filters.hag_nn"},
                     {
                         "type": "writers.las",
