@@ -129,9 +129,66 @@ Append these as form fields in the upload FormData: `classification_mode: native
 
 ---
 
-## 5. Out of Scope (v2)
+## 5. Inter-Module Data Contract
+
+LiDAR layers are Orion-LD `DigitalAsset` entities. Any module (hydrology, vegetation, risks, intelligence…) can discover and consume them via standard NGSI-LD queries.
+
+### 5.1 Discovery
+
+```http
+GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&refAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
+```
+
+Response is an array of NGSI-LD entities with these attributes:
+
+| Attribute | Type | Description | Use Case |
+|-----------|------|-------------|----------|
+| `resourceURL` | Property (string) | URL to tileset.json (3D Tiles, Cesium-compatible) | 3D visualization |
+| `source` | Property (string) | `"PNOA"` or `"user_upload"` | Data quality assessment |
+| `pointCount` | Property (integer) | Number of points | Performance estimation |
+| `dateObserved` | Property (ISO 8601) | Flight date | Temporal comparison |
+| `processingStatus` | Property (string) | `"completed"` when ready | Readiness check |
+| `refAgriParcel` | Relationship | Link to AgriParcel entity | Spatial context |
+
+### 5.2 Raw Point Cloud Access (for hydrology, DTM, analysis)
+
+For modules that need raw XYZ data (not just visualization tiles), the LiDAR module will expose:
+
+```http
+GET /api/lidar/export/{layer_id}/dtm?resolution=1.0       # DTM GeoTIFF (ground points only)
+GET /api/lidar/export/{layer_id}/dsm?resolution=1.0       # DSM GeoTIFF (first returns)
+GET /api/lidar/export/{layer_id}/chm?resolution=1.0       # CHM GeoTIFF (DSM - DTM)
+GET /api/lidar/export/{layer_id}/points?class=2           # Raw points as LAZ (filtered by LAS class)
+GET /api/lidar/export/{layer_id}/contours?interval=1.0    # Contour lines as GeoJSON
+```
+
+These endpoints are **read-only** and generate the output on-demand from the cached source LAZ in MinIO. They are scoped to the tenant via `X-Tenant-ID` header.
+
+### 5.3 Agent Instructions for Cross-Module Integration
+
+When building a module that consumes LiDAR data, an agent should:
+
+1. **Query Orion-LD for available layers:**
+   ```python
+   client = get_orion_client(tenant_id)
+   layers = client.list_assets(parcel_id=parcel_id)
+   # Filter by assetCategory == "LiDAR" and processingStatus == "completed"
+   ```
+
+2. **For 3D visualization:** pass `resourceURL` directly to Cesium `Cesium3DTileset.fromUrl()`.
+
+3. **For analysis/raster data:** call the `/api/lidar/export/` endpoints. The `source` attribute tells you if data is public PNOA (higher point density, pre-classified) or user drone (varies).
+
+4. **Tenant isolation:** always include `NGSILD-Tenant` or `X-Tenant-ID` header. Orion-LD returns only the tenant's own entities.
+
+5. **Error handling:** DigitalAsset may have `processingStatus: "failed"` — skip those. Check `pointCount` to estimate processing cost before requesting export.
+
+---
+
+## 6. Out of Scope (v2)
 
 - True per-cell vertical density percentiles (needs tile-level compute in py3dtiles or a post-processing pass)
 - Temporal comparison (two-layer diff)
 - Slope/aspect/hillshade from DTM
 - Crown polygon export (already partially implemented in Phase C, not wired to UI)
+- Export endpoints (defined above as contract, implementation deferred to hydrology module integration)
