@@ -256,7 +256,24 @@ class LidarPipeline:
                 raise ValueError("The provided LAZ file contains 0 valid points even without cropping.")
 
         logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
-    
+
+        # Compute HeightAboveGround for every point (required for canopy analysis)
+        hag_pipeline = {
+            "pipeline": [
+                {"type": "readers.las", "filename": self.cropped_laz},
+                {"type": "filters.smrf"},
+                {"type": "filters.hag"},
+                {
+                    "type": "writers.las",
+                    "filename": self.cropped_laz,
+                    "compression": "laszip",
+                    "extra_dims": "HeightAboveGround=float",
+                },
+            ]
+        }
+        pdal.Pipeline(json.dumps(hag_pipeline)).execute()
+        logger.info("Phase A HAG: HeightAboveGround computed and stored")
+
     def phase_b_spectral_fusion(self, ndvi_raster_url: str):
         """
         Phase B: Colorize points with NDVI values from a GeoTIFF.
