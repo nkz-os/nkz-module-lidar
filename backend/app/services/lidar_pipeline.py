@@ -567,9 +567,109 @@ class LidarPipeline:
         tileset_path = os.path.join(self.output_tiles_dir, "tileset.json")
         if not os.path.exists(tileset_path):
             raise RuntimeError("tileset.json not found after conversion")
-        
+
+        # Fix py3dtiles bounding volumes (known bug: Z extent can be 0,
+        # causing Cesium frustum culling to discard tiles).
+        self._fix_tileset_bounding_volumes(tileset_path)
+
         logger.info(f"Phase D complete. Tiles at: {self.output_tiles_dir}")
     
+    def _fix_tileset_bounding_volumes(self, tileset_path: str) -> None:
+        """
+        Post-process tileset.json to fix py3dtiles bounding volume bug.
+
+        py3dtiles 7.0.0 sometimes computes bounding volumes with Z half-axis=0,
+        which causes Cesium to cull tiles via frustum culling. This reads actual
+        point data from .pnts files and corrects the bounding boxes.
+        """
+        with open(tileset_path, "r") as f:
+            tileset = json.load(f)
+
+        root = tileset.get("root", {})
+        root_transform = root.get("transform")
+        self._fix_tile_bv(root, root_transform, os.path.dirname(tileset_path))
+
+        for child in root.get("children", []):
+            self._fix_tile_bv(child, root_transform, os.path.dirname(tileset_path))
+
+        with open(tileset_path, "w") as f:
+            json.dump(tileset, f, indent=2)
+
+        logger.info("Fixed tileset bounding volumes for Cesium compatibility")
+
+    def _fix_tile_bv(self, tile: dict, parent_transform: Optional[list], tiles_dir: str) -> None:
+        """Fix a single tile's bounding volume by reading actual point data."""
+        bv = tile.get("boundingVolume", {})
+        if "box" not in bv:
+            return
+
+        box = bv["box"]
+        content = tile.get("content", {})
+        uri = content.get("uri", "")
+
+        if uri and uri.endswith(".pnts"):
+            pnts_path = os.path.join(tiles_dir, uri)
+            if os.path.exists(pnts_path):
+                xyz_range = self._read_pnts_xyz_range(pnts_path)
+                if xyz_range:
+                    cx, cy, cz = box[0], box[1], box[2]
+                    # X half-axis (element 3,4,5)
+                    box[3] = max(box[3], (xyz_range["x_max"] - xyz_range["x_min"]) / 2, 0.01)
+                    box[4] = max(box[4], 0.001)
+                    box[5] = max(box[5], 0.001)
+                    # Y half-axis (element 6,7,8)
+                    box[6] = max(box[6], 0.001)
+                    box[7] = max(box[7], (xyz_range["y_max"] - xyz_range["y_min"]) / 2, 0.01)
+                    box[8] = max(box[8], 0.001)
+                    # Z half-axis (element 9,10,11) — this is the critical fix
+                    box[9] = max(box[9], 0.001)
+                    box[10] = max(box[10], (xyz_range["z_max"] - xyz_range["z_min"]) / 2, 0.01)
+                    box[11] = max(box[11], 0.001)
+                    # Ensure center matches data range
+                    box[0] = (xyz_range["x_max"] + xyz_range["x_min"]) / 2
+                    box[1] = (xyz_range["y_max"] + xyz_range["y_min"]) / 2
+                    box[2] = (xyz_range["z_max"] + xyz_range["z_min"]) / 2
+
+    def _read_pnts_xyz_range(self, pnts_path: str) -> Optional[dict]:
+        """Read XYZ coordinate ranges from a .pnts file."""
+        try:
+            with open(pnts_path, "rb") as f:
+                data = f.read()
+
+            feature_json_len = struct.unpack("<I", data[12:16])[0]
+            fj_start = 28
+            fj = json.loads(data[fj_start : fj_start + feature_json_len])
+            pts_count = fj.get("POINTS_LENGTH", 0)
+            if pts_count == 0:
+                return None
+
+            pos_off = fj_start + feature_json_len
+            # Read first 100 points and last 100 to estimate range
+            sample_count = min(100, pts_count)
+            xs, ys, zs = [], [], []
+
+            for i in range(sample_count):
+                off = pos_off + i * 12
+                x, y, z = struct.unpack("<fff", data[off : off + 12])
+                xs.append(x); ys.append(y); zs.append(z)
+
+            if pts_count > sample_count * 2:
+                for i in range(max(0, pts_count - sample_count), pts_count):
+                    off = pos_off + i * 12
+                    if off + 12 > len(data):
+                        break
+                    x, y, z = struct.unpack("<fff", data[off : off + 12])
+                    xs.append(x); ys.append(y); zs.append(z)
+
+            return {
+                "x_min": min(xs), "x_max": max(xs),
+                "y_min": min(ys), "y_max": max(ys),
+                "z_min": min(zs), "z_max": max(zs),
+            }
+        except Exception as exc:
+            logger.debug("Could not read pnts range from %s: %s", pnts_path, exc)
+            return None
+
     def _upload_results(self) -> str:
         """Upload tiles to MinIO and return the public URL."""
         prefix = str(self.job_id)
