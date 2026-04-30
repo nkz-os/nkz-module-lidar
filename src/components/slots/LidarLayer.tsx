@@ -100,7 +100,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
     try {
       return new Cesium.Cesium3DTileStyle({
         color: COLOR_RAMPS[mode] || COLOR_RAMPS.height,
-        pointSize: 3,
+        pointSize: 5,
       });
     } catch (error) {
       console.error('[LidarLayer] Error creating style:', error);
