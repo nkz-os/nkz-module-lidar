@@ -98,5 +98,18 @@
   "errorNoGeometry": "A geometria da entidade é necessária para o download do PNOA.",
   "loadingMetadata": "A carregar detalhes da entidade...",
   "noParcelSelected": "Nenhuma parcela selecionada",
-  "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR."
+  "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR.",
+  "color.hag": "Altura da Cultura",
+  "color.hag.desc": "Altura acima do solo",
+  "color.canopy": "Copa vs Cobertura",
+  "color.canopy.desc": "Copa da árvore vs sub-bosque",
+  "color.density": "Densidade",
+  "color.density.desc": "Proxy de estrutura vertical",
+  "uploadClassification": "Classificação",
+  "classificationNative": "Já vem classificado (PNOA, DJI Terra, Pix4D...)",
+  "classificationAuto": "Não classificado — auto-classificar",
+  "classificationDetect": "Não sei — detetar automaticamente",
+  "hasRgb": "Tem cor RGB",
+  "continue": "Continuar",
+  "cancel": "Cancelar"
 }

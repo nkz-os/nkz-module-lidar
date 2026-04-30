@@ -98,5 +98,18 @@
   "processingOptionsHint": "Applied when starting a new download or upload",
 "heightOffset": "Height offset",
 "cancelProcessing": "Cancel processing",
-"uploadedFiles": "Uploaded Files"
+"uploadedFiles": "Uploaded Files",
+"color.hag": "Crop Height",
+"color.hag.desc": "Height above ground",
+"color.canopy": "Canopy vs Cover",
+"color.canopy.desc": "Tree crown vs understory",
+"color.density": "Density",
+"color.density.desc": "Vertical structure proxy",
+"uploadClassification": "Classification",
+"classificationNative": "Already classified (PNOA, DJI Terra, Pix4D...)",
+"classificationAuto": "Unclassified — auto-classify",
+"classificationDetect": "I don’t know — detect automatically",
+"hasRgb": "Has RGB color",
+"continue": "Continue",
+"cancel": "Cancel"
 }

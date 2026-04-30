@@ -98,5 +98,18 @@
 "heightOffset": "Altuera doikuntza",
 "cancelProcessing": "Prozesamendua utzi",
 "uploadedFiles": "Igotako Fitxategiak",
-"errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
+"errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko.",
+"color.hag": "Laboreren Altuera",
+"color.hag.desc": "Lurraren gaineko altuera",
+"color.canopy": "Kopa vs Estaldura",
+"color.canopy.desc": "Zuhaitz kopa vs sastraka",
+"color.density": "Dentsitatea",
+"color.density.desc": "Egitura bertikalaren hurbilketa",
+"uploadClassification": "Sailkapena",
+"classificationNative": "Dagoeneko sailkatua (PNOA, DJI Terra, Pix4D...)",
+"classificationAuto": "Sailkatu gabe — auto-sailkatu",
+"classificationDetect": "Ez dakit — automatikoki detektatu",
+"hasRgb": "RGB kolorea du",
+"continue": "Jarraitu",
+"cancel": "Utzi"
 }

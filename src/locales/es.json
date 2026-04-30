@@ -98,5 +98,18 @@
   "processingOptionsHint": "Se aplica al iniciar una nueva descarga o subida",
 "heightOffset": "Ajuste de altura",
 "cancelProcessing": "Cancelar procesamiento",
-"uploadedFiles": "Archivos Subidos"
+"uploadedFiles": "Archivos Subidos",
+"color.hag": "Altura Cultivo",
+"color.hag.desc": "Altura sobre el suelo",
+"color.canopy": "Copa vs Cubierta",
+"color.canopy.desc": "Copa del árbol vs sotobosque",
+"color.density": "Densidad",
+"color.density.desc": "Proxy de estructura vertical",
+"uploadClassification": "Clasificación",
+"classificationNative": "Ya viene clasificado (PNOA, DJI Terra, Pix4D...)",
+"classificationAuto": "Sin clasificar — auto-clasificar",
+"classificationDetect": "No lo sé — detectar automáticamente",
+"hasRgb": "Tiene color RGB",
+"continue": "Continuar",
+"cancel": "Cancelar"
 }

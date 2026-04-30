@@ -98,5 +98,18 @@
   "errorNoGeometry": "Es requereix la geometria de l'entitat per a la descàrrega del PNOA.",
   "loadingMetadata": "Carregant detalls de l'entitat...",
   "noParcelSelected": "Cap parcel·la seleccionada",
-  "selectParcelToUpload": "Selecciona una parcel·la del mapa per pujar o descarregar dades LiDAR."
+  "selectParcelToUpload": "Selecciona una parcel·la del mapa per pujar o descarregar dades LiDAR.",
+  "color.hag": "Alçada del Cultiu",
+  "color.hag.desc": "Alçada sobre el sòl",
+  "color.canopy": "Copa vs Cobertura",
+  "color.canopy.desc": "Copa d’arbre vs sotabosc",
+  "color.density": "Densitat",
+  "color.density.desc": "Proxy d’estructura vertical",
+  "uploadClassification": "Classificació",
+  "classificationNative": "Ja ve classificat (PNOA, DJI Terra, Pix4D...)",
+  "classificationAuto": "Sense classificar — auto-classificar",
+  "classificationDetect": "No ho sé — detectar automàticament",
+  "hasRgb": "Té color RGB",
+  "continue": "Continuar",
+  "cancel": "Cancel·lar"
 }
