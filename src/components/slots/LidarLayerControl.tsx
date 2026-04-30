@@ -96,9 +96,11 @@ const LidarLayerControl: React.FC = () => {
 
   const COLOR_MODE_OPTIONS: { value: ColorMode; label: string; icon: string; desc: string }[] = [
     { value: 'height', label: t('color.height'), icon: '\u{1F4CF}', desc: t('color.height.desc') },
-    { value: 'ndvi', label: t('color.ndvi'), icon: '\u{1F33F}', desc: t('color.ndvi.desc') },
-    { value: 'rgb', label: t('color.rgb'), icon: '\u{1F3A8}', desc: t('color.rgb.desc') },
     { value: 'classification', label: t('color.classification'), icon: '\u{1F3F7}\uFE0F', desc: t('color.classification.desc') },
+    { value: 'heightAboveGround', label: t('color.hag'), icon: '\u{1F4D0}', desc: t('color.hag.desc') },
+    { value: 'canopyCover', label: t('color.canopy'), icon: '\u{1F33F}', desc: t('color.canopy.desc') },
+    { value: 'verticalDensity', label: t('color.density'), icon: '\u{1F4CA}', desc: t('color.density.desc') },
+    { value: 'rgb', label: t('color.rgb'), icon: '\u{1F3A8}', desc: t('color.rgb.desc') },
   ];
 
   // Auto-dismiss errors after 8 seconds

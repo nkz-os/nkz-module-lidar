@@ -3,7 +3,7 @@ type Listener = () => void;
 class LidarStore {
   public selectedLayerId: string | null = null;
   public activeTilesetUrl: string | null = null;
-  public colorMode: 'height' | 'ndvi' | 'rgb' | 'classification' = 'height';
+  public colorMode: 'height' | 'classification' | 'heightAboveGround' | 'canopyCover' | 'verticalDensity' | 'rgb' = 'height';
   public showTrees: boolean = false;
   public heightOffset: number = -50;  // meters, negative = push down to compensate orthometric→ellipsoidal datum
   public layers: any[] = [];
@@ -25,7 +25,7 @@ class LidarStore {
     this.notify();
   }
 
-  setColorMode(mode: 'height' | 'ndvi' | 'rgb' | 'classification') {
+  setColorMode(mode: 'height' | 'classification' | 'heightAboveGround' | 'canopyCover' | 'verticalDensity' | 'rgb') {
     this.colorMode = mode;
     this.notify();
   }

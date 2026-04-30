@@ -129,11 +129,11 @@ class LidarPipeline:
             self.update_job_status("processing", 10, "Downloading and cropping point cloud...")
             self.phase_a_ingest(laz_url, geometry_wkt, config.get("source_crs"))
             
-            # Phase B: Spectral Fusion (if NDVI source provided)
+            # Phase B: Spectral Fusion (if NDVI source provided and color mode is rgb)
             ndvi_url = config.get("ndvi_source_url")
             colorize_by = config.get("colorize_by", "height")
-            
-            if colorize_by == "ndvi" and ndvi_url:
+
+            if colorize_by == "rgb" and ndvi_url:
                 self.update_job_status("processing", 30, "Applying NDVI colorization...")
                 self.phase_b_spectral_fusion(ndvi_url)
             else:

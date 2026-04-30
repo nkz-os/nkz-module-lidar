@@ -57,7 +57,7 @@ function geoJsonToWkt(geojson: GeoJSONGeometry): string | null {
 // Types
 // ============================================================================
 
-export type ColorMode = 'height' | 'ndvi' | 'rgb' | 'classification';
+export type ColorMode = 'height' | 'classification' | 'heightAboveGround' | 'canopyCover' | 'verticalDensity' | 'rgb';
 
 interface LidarContextType {
   // Entity Selection

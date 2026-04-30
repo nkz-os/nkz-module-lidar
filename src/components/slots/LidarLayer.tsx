@@ -39,7 +39,6 @@ interface LidarLayerProps {
 
 // Color ramps for different visualization modes
 const COLOR_RAMPS: Record<string, string> = {
-  // Height: Blue (low) → Cyan → Green → Yellow → Red (high)
   height: `
     float t = clamp((\${POSITION}[2] - 0.0) / 50.0, 0.0, 1.0);
     float r = t < 0.5 ? 0.0 : (t - 0.5) * 2.0;
@@ -48,34 +47,46 @@ const COLOR_RAMPS: Record<string, string> = {
     color(r, g, b, 1.0)
   `,
 
-  // NDVI: Red (unhealthy) → Yellow → Green (healthy)
-  ndvi: `
-    float ndvi = clamp(\${NDVI}, -1.0, 1.0);
-    float r = clamp(1.0 - ndvi, 0.0, 1.0);
-    float g = clamp(ndvi, 0.0, 1.0);
+  classification: `
+    float c = \${Classification};
+    if (c == 2.0) { color(0.55, 0.35, 0.15, 1.0) }
+    else if (c == 3.0) { color(0.0, 0.7, 0.1, 1.0) }
+    else if (c == 4.0) { color(0.0, 0.65, 0.0, 1.0) }
+    else if (c == 5.0) { color(0.0, 0.5, 0.0, 1.0) }
+    else if (c == 6.0) { color(0.7, 0.7, 0.7, 1.0) }
+    else if (c == 9.0) { color(0.0, 0.3, 0.8, 1.0) }
+    else { color(0.9, 0.9, 0.9, 1.0) }
+  `,
+
+  heightAboveGround: `
+    float h = \${HeightAboveGround};
+    float t = clamp(h / 5.0, 0.0, 1.0);
+    float r = t < 0.33 ? t * 2.0 : (t < 0.66 ? 1.0 : 1.0);
+    float g = t < 0.33 ? 0.5 + t : (t < 0.66 ? 1.0 : 2.0 - t);
+    float b = t < 0.33 ? 0.0 : 0.0;
+    color(r, g, b, 1.0)
+  `,
+
+  canopyCover: `
+    float h = \${HeightAboveGround};
+    float rn = \${ReturnNumber};
+    if (rn > 1.0 && h < 1.5) { color(0.2, 0.8, 0.2, 1.0) }
+    else if (h > 2.5) { color(0.0, 0.4, 0.1, 1.0) }
+    else if (h < 0.3) { color(0.55, 0.35, 0.15, 1.0) }
+    else { color(0.4, 0.7, 0.1, 1.0) }
+  `,
+
+  verticalDensity: `
+    float h = \${HeightAboveGround};
+    float d = clamp(h / 8.0, 0.0, 1.0);
+    float r = d;
+    float g = 1.0 - d;
     color(r, g, 0.0, 1.0)
   `,
 
-  // RGB: True color from point cloud
   rgb: `
     vec4 c = \${COLOR};
     color(c.r, c.g, c.b, 1.0)
-  `,
-
-  // Classification: Standard LiDAR classification colors
-  classification: `
-    var class = \${Classification};
-    if (class == 2.0) { // Ground
-      color(0.6, 0.4, 0.2, 1.0)
-    } else if (class == 3.0 || class == 4.0 || class == 5.0) { // Vegetation
-      color(0.0, 0.8, 0.2, 1.0)
-    } else if (class == 6.0) { // Building
-      color(0.8, 0.0, 0.0, 1.0)
-    } else if (class == 9.0) { // Water
-      color(0.0, 0.4, 0.8, 1.0)
-    } else {
-      color(0.5, 0.5, 0.5, 1.0)
-    }
   `,
 };
 

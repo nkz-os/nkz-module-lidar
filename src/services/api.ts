@@ -9,7 +9,7 @@
 // ============================================================================
 
 export interface ProcessingConfig {
-    colorize_by: 'height' | 'ndvi' | 'rgb' | 'classification';
+    colorize_by: 'height' | 'classification' | 'heightAboveGround' | 'canopyCover' | 'verticalDensity' | 'rgb';
     detect_trees: boolean;
     tree_min_height: number;
     tree_search_radius: number;

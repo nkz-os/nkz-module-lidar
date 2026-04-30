@@ -72,10 +72,12 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
                 {t('config.viewMode')}
               </label>
               <p className="text-sm text-slate-800 mt-1 capitalize">
-                {colorMode === 'ndvi' ? t('config.viewMode.ndvi') :
-                  colorMode === 'height' ? t('config.viewMode.height') :
-                    colorMode === 'rgb' ? t('config.viewMode.rgb') :
-                      colorMode === 'classification' ? t('config.viewMode.classification') : colorMode}
+                {colorMode === 'height' ? t('config.viewMode.height') :
+                  colorMode === 'classification' ? t('config.viewMode.classification') :
+                    colorMode === 'heightAboveGround' ? t('config.viewMode.hag') :
+                      colorMode === 'canopyCover' ? t('config.viewMode.canopy') :
+                        colorMode === 'verticalDensity' ? t('config.viewMode.density') :
+                          colorMode === 'rgb' ? t('config.viewMode.rgb') : colorMode}
               </p>
             </div>
           )}
