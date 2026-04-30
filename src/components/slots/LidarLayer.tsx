@@ -41,7 +41,7 @@ interface LidarLayerProps {
 const COLOR_RAMPS: Record<string, string> = {
   // Height: Blue (low) → Cyan → Green → Yellow → Red (high)
   height: `
-    float t = clamp((${POSITION}[2] - 0.0) / 50.0, 0.0, 1.0);
+    float t = clamp((\${POSITION}[2] - 0.0) / 50.0, 0.0, 1.0);
     float r = t < 0.5 ? 0.0 : (t - 0.5) * 2.0;
     float g = t < 0.5 ? t * 2.0 : 2.0 - t * 2.0;
     float b = 1.0 - t;
@@ -50,7 +50,7 @@ const COLOR_RAMPS: Record<string, string> = {
 
   // NDVI: Red (unhealthy) → Yellow → Green (healthy)
   ndvi: `
-    float ndvi = clamp(${NDVI}, -1.0, 1.0);
+    float ndvi = clamp(\${NDVI}, -1.0, 1.0);
     float r = clamp(1.0 - ndvi, 0.0, 1.0);
     float g = clamp(ndvi, 0.0, 1.0);
     color(r, g, 0.0, 1.0)
@@ -58,7 +58,7 @@ const COLOR_RAMPS: Record<string, string> = {
 
   // RGB: True color from point cloud
   rgb: `
-    vec4 c = ${COLOR};
+    vec4 c = \${COLOR};
     color(c.r, c.g, c.b, 1.0)
   `,
 
