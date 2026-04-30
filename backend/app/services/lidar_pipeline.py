@@ -258,21 +258,53 @@ class LidarPipeline:
         logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
 
         # Compute HeightAboveGround for every point (required for canopy analysis)
-        hag_pipeline = {
-            "pipeline": [
-                {"type": "readers.las", "filename": self.cropped_laz},
-                {"type": "filters.smrf"},
-                {"type": "filters.hag"},
-                {
-                    "type": "writers.las",
-                    "filename": self.cropped_laz,
-                    "compression": "laszip",
-                    "extra_dims": "HeightAboveGround=float",
-                },
-            ]
-        }
-        pdal.Pipeline(json.dumps(hag_pipeline)).execute()
-        logger.info("Phase A HAG: HeightAboveGround computed and stored")
+        # Auto-classify if the input lacks classification (common for drone uploads)
+        needs_classification = False
+        try:
+            with laspy.open(self.cropped_laz) as reader:
+                las = reader.read()
+                if hasattr(las, 'classification'):
+                    unique_classes = set(int(c) for c in las.classification)
+                    needs_classification = len(unique_classes) <= 1 and 0 in unique_classes
+                else:
+                    needs_classification = True
+        except Exception:
+            needs_classification = True
+
+        if needs_classification:
+            logger.info("Input lacks classification — auto-classifying with PDAL smrf")
+            hag_pipeline = {
+                "pipeline": [
+                    {"type": "readers.las", "filename": self.cropped_laz},
+                    {"type": "filters.smrf"},
+                    {"type": "filters.hag"},
+                    {
+                        "type": "writers.las",
+                        "filename": self.cropped_laz,
+                        "compression": "laszip",
+                        "extra_dims": "HeightAboveGround=float",
+                    },
+                ]
+            }
+            pdal.Pipeline(json.dumps(hag_pipeline)).execute()
+            logger.info("Auto-classification and HAG complete")
+        else:
+            # Already classified — just run HAG
+            hag_pipeline = {
+                "pipeline": [
+                    {"type": "readers.las", "filename": self.cropped_laz},
+                    {"type": "filters.smrf"},
+                    {"type": "filters.hag"},
+                    {
+                        "type": "writers.las",
+                        "filename": self.cropped_laz,
+                        "compression": "laszip",
+                        "extra_dims": "HeightAboveGround=float",
+                    },
+                ]
+            }
+            pdal.Pipeline(json.dumps(hag_pipeline)).execute()
+            logger.info("HAG computed on pre-classified data")
 
     def phase_b_spectral_fusion(self, ndvi_raster_url: str):
         """
