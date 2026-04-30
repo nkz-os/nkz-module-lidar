@@ -94,5 +94,7 @@
   "noParcelSelected": "Ez dago partzelarik hautatuta",
   "selectParcelToUpload": "Hautatu partzela bat mapan LiDAR datuak igotzeko edo deskargatzeko.",
   "loadingMetadata": "Entitatearen xehetasunak kargatzen...",
-  "errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
+  "processingOptionsHint": "Deskarga edo igoera berri bat hastean aplikatzen da",
+"heightOffset": "Altuera doikuntza",
+"errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
 }
