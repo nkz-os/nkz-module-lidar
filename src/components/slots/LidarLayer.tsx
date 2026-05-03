@@ -9,8 +9,9 @@
  */
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useTheme } from '@nekazari/design-tokens';
+import { Spinner } from '@nekazari/ui-kit';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
-import { Loader2 } from 'lucide-react';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Cesium types are loaded globally by the host at runtime.
@@ -84,6 +85,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   const tilesetRef = useRef<CesiumTilesetType | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const theme = useTheme();
 
   // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
   const contextViewer = useCesiumViewer();
@@ -232,9 +234,9 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   // Show loading indicator while tileset loads
   if (activeTilesetUrl && isLoading) {
     return (
-      <div className="absolute bottom-4 left-4 z-50 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-slate-200 flex items-center gap-2">
-        <Loader2 className="w-4 h-4 text-violet-500 animate-spin" />
-        <span className="text-sm text-slate-700">Loading point cloud...</span>
+      <div className="absolute bottom-4 left-4 z-50 bg-nkz-surface backdrop-blur-sm rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-nkz-border flex items-center gap-nkz-inline">
+        <Spinner size="sm" />
+        <span className="text-nkz-sm text-nkz-text-primary">Loading point cloud...</span>
       </div>
     );
   }
@@ -242,8 +244,8 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   // Show error if Cesium or loading fails
   if (loadError) {
     return (
-      <div className="absolute bottom-4 left-4 z-50 bg-red-50 rounded-lg px-3 py-2 shadow-lg border border-red-200">
-        <span className="text-sm text-red-700">{loadError}</span>
+      <div className="absolute bottom-4 left-4 z-50 bg-nkz-danger-soft rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-nkz-danger">
+        <span className="text-nkz-sm text-nkz-danger-strong">{loadError}</span>
       </div>
     );
   }

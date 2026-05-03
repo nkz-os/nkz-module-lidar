@@ -7,9 +7,8 @@
 
 import { lidarSlots } from './slots/index';
 
-// Import CSS so it's inlined in the IIFE bundle (also imports App for side effects)
+// Import App for side effects
 import './App';
-import './index.css';
 
 console.log('[nkz-module-lidar] 🟢 Bundle loaded v1.1.0');
 
