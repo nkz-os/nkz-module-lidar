@@ -545,6 +545,10 @@ class LidarPipeline:
         # The Python convert() API hangs in this environment (master process
         # spins at 100% CPU while ZMQ workers stay idle, no tiles emitted).
         # The CLI executable spawns a fresh process and works reliably.
+        # stdout is dropped because py3dtiles emits a stream of progress lines
+        # (one carriage-return-overwritten line per percent on every tile);
+        # capturing them in a Python buffer pushes worker memory past 2 GiB
+        # on bigger inputs and OOM-kills the RQ worker process.
         py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
         cmd = [
             py3dtiles_bin, "convert",
@@ -559,8 +563,12 @@ class LidarPipeline:
         env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
         logger.info(f"Running: {' '.join(cmd)}")
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=settings.PY3DTILES_TIMEOUT, env=env,
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=settings.PY3DTILES_TIMEOUT,
+            env=env,
         )
         if result.returncode != 0:
             logger.error(f"py3dtiles failed: {result.stderr}")

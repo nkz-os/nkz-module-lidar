@@ -13,7 +13,9 @@ Usage:
 """
 
 import logging
+import socket
 import sys
+import uuid
 from typing import Optional, Tuple
 
 from redis import Redis
@@ -167,12 +169,17 @@ def run_worker():
     redis_conn = create_redis_connection()
     reconcile_failed_jobs(redis_conn, settings.WORKER_QUEUE_NAME)
 
+    # Worker name must be unique per container instance: pod hostname stays
+    # the same across in-place container restarts, which would collide with
+    # the still-active Redis registration of the dying container.
+    worker_name = f"lidar-worker-{socket.gethostname()}-{uuid.uuid4().hex[:6]}"
+
     with Connection(redis_conn):
         queues = [Queue(settings.WORKER_QUEUE_NAME)]
 
         worker = Worker(
             queues,
-            name=f"lidar-worker-{settings.WORKER_QUEUE_NAME}",
+            name=worker_name,
             default_worker_ttl=settings.WORKER_TIMEOUT,
             exception_handlers=[_rq_exception_handler],
             work_horse_killed_handler=_work_horse_killed_handler,
