@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
@@ -655,6 +655,109 @@ async def serve_tileset_file(file_path: str, request: Request):
             "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
             "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+# ============================================================================
+# Export / Download — cross-module data contract
+# ============================================================================
+
+EXPORT_PRODUCTS = {
+    "dtm":   ("dtm.tif", "image/tiff"),
+    "dsm":   ("dsm.tif", "image/tiff"),
+    "chm":   ("chm.tif", "image/tiff"),
+    "points": ("classified_laz.laz", "application/octet-stream"),
+}
+
+
+@router.get("/export/{layer_id}/{product}")
+async def export_derived_product(
+    layer_id: str,
+    product: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Download a derived LiDAR product for a completed layer.
+
+    **Products:**
+
+    | `product` | Returns | Use case |
+    |-----------|---------|----------|
+    | `dtm` | GeoTIFF | Ground elevation model — hydrology, slope, path planning |
+    | `dsm` | GeoTIFF | Surface model (canopy + buildings) — roughness, line-of-sight |
+    | `chm` | GeoTIFF | Canopy Height Model = DSM − DTM — biomass, vigor, vegetation analysis |
+    | `points` | LAZ | Classified point cloud (ground/vegetation/building/water) — custom PDAL pipelines, structural analysis |
+
+    The files are stored in MinIO under the same prefix as the 3D Tiles tileset.
+    They are generated automatically during ingestion; no additional processing is
+    required.
+
+    **Cross-module integration:**
+
+    Other modules (Vegetation, Risks, Cadastral, Robotics, BioOrchestrator, …)
+    should first discover available layers via the Orion-LD Context Broker:
+
+    ```
+    GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&refAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
+    ```
+
+    The response includes NGSI-LD attributes (`dtmUrl`, `dsmUrl`, `chmUrl`,
+    `classifiedLazUrl`) pointing to this endpoint. Pick the product you need
+    and fetch it with the tenant's cookie-based auth.
+
+    **Error handling:**
+    - 404 if the layer does not exist, has no derived product, or `processingStatus != completed`.
+    - 403 if the tenant does not own the layer.
+    """
+    if product not in EXPORT_PRODUCTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown product '{product}'. Available: {', '.join(EXPORT_PRODUCTS.keys())}",
+        )
+
+    # Verify the DigitalAsset exists and belongs to this tenant
+    from app.services.orion_client import get_orion_client as _get_oc
+    entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
+    try:
+        asset = await _get_oc(tenant_id).get_asset(entity_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Layer not found")
+
+    status_val = asset.get("processingStatus", {})
+    if isinstance(status_val, dict):
+        status_val = status_val.get("value")
+    if status_val != "completed":
+        raise HTTPException(
+            status_code=404,
+            detail="Layer processing is not complete — derived products not available yet",
+        )
+
+    # Stream from MinIO
+    from app.services.storage import storage_service
+    s3_key = f"{layer_id}/{EXPORT_PRODUCTS[product][0]}"
+
+    try:
+        response = storage_service.client.get_object(
+            Bucket=storage_service.bucket,
+            Key=s3_key,
+        )
+        content = response["Body"].read()
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Derived product '{product}' not found for this layer. "
+                   "It may have been processed before cross-module persistence was enabled.",
+        )
+
+    filename = f"{layer_id}_{EXPORT_PRODUCTS[product][0]}"
+    return Response(
+        content=content,
+        media_type=EXPORT_PRODUCTS[product][1],
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",
         },
     )
 

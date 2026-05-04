@@ -74,6 +74,9 @@ class LidarPipeline:
         self.colored_laz: Optional[str] = None
         self.output_tiles_dir: Optional[str] = None
         self.reprojected_laz: Optional[str] = None
+        self.dtm_path: Optional[str] = None
+        self.dsm_path: Optional[str] = None
+        self.chm_path: Optional[str] = None
         self.detected_trees: List[Dict[str, Any]] = []
         self.source_crs: Optional[str] = None
         self.bounds_validator = GeoBoundsValidator(
@@ -140,8 +143,12 @@ class LidarPipeline:
                 # Just copy cropped to colored path
                 self.colored_laz = self.cropped_laz
                 self.update_job_status("processing", 30, "Skipping spectral fusion (no NDVI source)")
-            
-            # Phase C: Tree Segmentation (if enabled)
+
+            # Derived products: DTM, DSM, CHM (always generated for cross-module consumption)
+            self.update_job_status("processing", 40, "Generating DTM/DSM/CHM...")
+            self._generate_dtm_dsm_chm()
+
+            # Phase C: Tree Segmentation (if enabled, reuses CHM already generated above)
             detect_trees = config.get("detect_trees", False)
             if detect_trees:
                 self.update_job_status("processing", 50, "Detecting individual trees...")
@@ -155,20 +162,20 @@ class LidarPipeline:
             
             # Upload results to MinIO
             self.update_job_status("processing", 90, "Uploading results...")
-            tileset_url = self._upload_results()
-            
+            upload_urls = self._upload_results()
+
             # Create Orion-LD entities
             self.update_job_status("processing", 95, "Creating digital twin entities...")
-            
+
             # Update job with results
             result = {
-                "tileset_url": tileset_url,
+                "tileset_url": upload_urls["tileset"],
                 "tree_count": len(self.detected_trees),
                 "trees": self.detected_trees,
-                "point_count": self._count_points()
+                "point_count": self._count_points(),
             }
-            
-            self._create_orion_entities(tileset_url, config, result)
+
+            self._create_orion_entities(upload_urls, config, result)
             self.update_job_status("completed", 100, "Processing complete!")
             
             return result
@@ -308,6 +315,53 @@ class LidarPipeline:
         
         logger.info(f"Phase B complete. Output: {self.colored_laz}")
     
+    def _generate_dtm_dsm_chm(self, resolution: float = 0.5):
+        """Generate DTM, DSM, and CHM from the cropped+colored point cloud.
+
+        These derived products are always produced (regardless of tree-detection
+        config) so other modules can consume them via the export API without
+        needing to reprocess the source LAZ.
+
+        Stores paths in self.dtm_path, self.dsm_path, self.chm_path.
+        """
+        logger.info("Generating DTM/DSM/CHM")
+        source_laz = self.colored_laz or self.cropped_laz
+        self.dtm_path = os.path.join(self.work_dir, "dtm.tif")
+        self.dsm_path = os.path.join(self.work_dir, "dsm.tif")
+        self.chm_path = os.path.join(self.work_dir, "chm.tif")
+
+        # DTM: ground-classified points interpolated to raster
+        pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "filters.range", "limits": "Classification[2:2]"},
+                {"type": "writers.gdal", "filename": self.dtm_path,
+                 "resolution": resolution, "output_type": "idw"},
+            ]
+        })).execute()
+
+        # DSM: highest-return surface
+        pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "writers.gdal", "filename": self.dsm_path,
+                 "resolution": resolution, "output_type": "max"},
+            ]
+        })).execute()
+
+        # CHM = DSM - DTM
+        with rasterio.open(self.dtm_path) as dtm_src, rasterio.open(self.dsm_path) as dsm_src:
+            dtm = dtm_src.read(1)
+            dsm = dsm_src.read(1)
+            chm = dsm - dtm
+            chm[chm < 0] = 0
+            chm[np.isnan(chm)] = 0
+            profile = dtm_src.profile.copy()
+            with rasterio.open(self.chm_path, 'w', **profile) as dst:
+                dst.write(chm, 1)
+
+        logger.info("DTM/DSM/CHM generation complete")
+
     def phase_c_tree_segmentation(
         self,
         min_height: float = 2.0,
@@ -316,79 +370,32 @@ class LidarPipeline:
     ):
         """
         Phase C: Detect individual trees using CHM and watershed segmentation.
-        
+
+        Requires that _generate_dtm_dsm_chm() has already been called (the
+        CHM raster is reused from self.chm_path).
+
         Steps:
-        1. Generate CHM (Canopy Height Model) from point cloud
+        1. Load pre-computed CHM
         2. Find local maxima (tree tops)
         3. Apply watershed segmentation
-        4. Extract tree statistics
-        
+        4. Extract tree statistics with canopy polygons
+
         Args:
             min_height: Minimum tree height to detect (meters)
             search_radius: Search radius for local maxima (meters)
             chm_resolution: Resolution of CHM raster (meters)
-        
-        Returns:
-            List of detected trees with their properties
         """
         logger.info("Phase C: Tree segmentation")
-        
-        # Generate CHM using PDAL
-        dtm_path = os.path.join(self.work_dir, "dtm.tif")
-        dsm_path = os.path.join(self.work_dir, "dsm.tif")
-        chm_path = os.path.join(self.work_dir, "chm.tif")
-        
-        source_laz = self.colored_laz or self.cropped_laz
-        
-        # Step 1: Generate DTM (ground points only)
-        dtm_pipeline = {
-            "pipeline": [
-                {"type": "readers.las", "filename": source_laz},
-                {"type": "filters.range", "limits": "Classification[2:2]"},  # Ground only (smrf already ran in Phase A if needed)
-                {
-                    "type": "writers.gdal",
-                    "filename": dtm_path,
-                    "resolution": chm_resolution,
-                    "output_type": "idw"
-                }
-            ]
-        }
-        pdal.Pipeline(json.dumps(dtm_pipeline)).execute()
-        
-        # Step 2: Generate DSM (highest points)
-        dsm_pipeline = {
-            "pipeline": [
-                {"type": "readers.las", "filename": source_laz},
-                {
-                    "type": "writers.gdal",
-                    "filename": dsm_path,
-                    "resolution": chm_resolution,
-                    "output_type": "max"
-                }
-            ]
-        }
-        pdal.Pipeline(json.dumps(dsm_pipeline)).execute()
-        
-        # Step 3: Calculate CHM = DSM - DTM
-        with rasterio.open(dtm_path) as dtm_src, rasterio.open(dsm_path) as dsm_src:
-            dtm = dtm_src.read(1)
-            dsm = dsm_src.read(1)
-            transform = dtm_src.transform
-            crs = dtm_src.crs
-            
-            # Calculate CHM
-            chm = dsm - dtm
-            chm[chm < 0] = 0  # Remove negative values
-            chm[np.isnan(chm)] = 0
-            
-            # Save CHM
-            profile = dtm_src.profile.copy()
-            with rasterio.open(chm_path, 'w', **profile) as dst:
-                dst.write(chm, 1)
-        
-        # Step 4: Find tree tops (local maxima)
-        logger.info("Finding tree tops...")
-        
+
+        if not self.chm_path or not os.path.exists(self.chm_path):
+            raise RuntimeError("CHM not found — _generate_dtm_dsm_chm() must run before tree segmentation")
+
+        # Load the pre-computed CHM
+        with rasterio.open(self.chm_path) as chm_src:
+            chm = chm_src.read(1)
+            transform = chm_src.transform
+            crs = chm_src.crs
+
         # Apply minimum height threshold
         chm_masked = np.where(chm >= min_height, chm, 0)
         
@@ -721,14 +728,44 @@ class LidarPipeline:
             logger.debug("Could not read pnts range from %s: %s", pnts_path, exc)
             return None
 
-    def _upload_results(self) -> str:
-        """Upload tiles to MinIO and return the public URL."""
+    def _upload_results(self) -> Dict[str, str]:
+        """Upload tiles and derived products to MinIO.
+
+        Returns a dict mapping product keys to public URLs so the caller
+        can attach them to the Orion-LD DigitalAsset entity.
+        """
         prefix = str(self.job_id)
+
+        # 3D Tiles (directory)
         tileset_url = storage_service.upload_directory(
             self.output_tiles_dir,
             prefix
         )
-        return tileset_url
+
+        urls = {"tileset": tileset_url}
+
+        # Derived rasters and classified LAZ (individual files)
+        derived_files = {
+            "dtm": (self.dtm_path, "image/tiff"),
+            "dsm": (self.dsm_path, "image/tiff"),
+            "chm": (self.chm_path, "image/tiff"),
+            "classified_laz": (self.colored_laz or self.cropped_laz, "application/octet-stream"),
+        }
+
+        for product_key, (local_path, content_type) in derived_files.items():
+            if local_path and os.path.exists(local_path):
+                ext = os.path.splitext(local_path)[1] or (".tif" if product_key != "classified_laz" else ".laz")
+                s3_key = f"{prefix}/{product_key}{ext}"
+                storage_service.client.upload_file(
+                    local_path,
+                    storage_service.bucket,
+                    s3_key,
+                    ExtraArgs={"ContentType": content_type},
+                )
+                urls[product_key] = storage_service.get_public_url(s3_key)
+                logger.info(f"Uploaded {product_key}: {urls[product_key]}")
+
+        return urls
     
     def _prepare_tiling_input(self, source_laz: str) -> str:
         """
@@ -804,12 +841,14 @@ class LidarPipeline:
         if not self.bounds_validator.validate_lon_lat(lon, lat):
             raise GeodesyValidationError("CRS_BBOX_OUTLIER")
     
-    def _create_orion_entities(self, tileset_url: str, config: Dict[str, Any], result: Dict[str, Any]):
+    def _create_orion_entities(self, upload_urls: Dict[str, str], config: Dict[str, Any], result: Dict[str, Any]):
         """
         Create Orion-LD entities for the processed data.
-        
+
         Creates:
-        - DigitalAsset entity for the tileset
+        - DigitalAsset entity linking the tileset and all derived products
+          (DTM, DSM, CHM, classified LAZ) so other modules can discover and
+          consume them via standard NGSI-LD queries.
         - AgriTree entities for detected trees (if any)
         """
         client = get_orion_client(self.tenant_id)
@@ -817,15 +856,19 @@ class LidarPipeline:
         client.create_digital_asset_sync(
             asset_id=asset_id,
             parcel_id=self.parcel_id,
-            tileset_url=tileset_url,
+            tileset_url=upload_urls["tileset"],
             source=config.get("source", "PNOA"),
             point_count=result.get("point_count", 0),
             tree_count=result.get("tree_count", 0),
+            dtm_url=upload_urls.get("dtm"),
+            dsm_url=upload_urls.get("dsm"),
+            chm_url=upload_urls.get("chm"),
+            classified_laz_url=upload_urls.get("classified_laz"),
         )
         self.update_job_status(
-            "completed", 
-            100, 
-            f"Processed tileset: {tileset_url}"
+            "completed",
+            100,
+            f"Processed tileset: {upload_urls['tileset']}"
         )
     
     def _cleanup(self):
