@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     WORKER_TIMEOUT: int = 1800        # 30 min — RQ job_timeout
     PY3DTILES_TIMEOUT: int = 1500     # 25 min — subprocess.run timeout
 
+    # py3dtiles defaults to os.cpu_count() workers and host_total_mem/10 of
+    # cache, neither cgroup-aware. Cap to values compatible with the pod
+    # memory limit (2 GiB → 4 jobs × ~150 MiB + 256 MiB cache + 400 MiB
+    # parent worker keeps headroom for laspy/pdal buffers).
+    PY3DTILES_JOBS: int = 4
+    PY3DTILES_CACHE_SIZE_MB: int = 256
+
     # Security
     CORS_ORIGINS: str = "http://localhost:3000"
     PROJ_USER_WRITABLE_DIRECTORY: str = "/var/cache/proj"

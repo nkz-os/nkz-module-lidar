@@ -550,12 +550,18 @@ class LidarPipeline:
         # capturing them in a Python buffer pushes worker memory past 2 GiB
         # on bigger inputs and OOM-kills the RQ worker process.
         py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
+        # py3dtiles defaults --jobs to os.cpu_count() (12 on this host) and
+        # --cache_size to host_total_memory/10, neither of which respect the
+        # pod cgroup limit. Combined with the resident RQ worker process
+        # they OOM-kill a 2 GiB pod mid-conversion. Cap both explicitly.
         cmd = [
             py3dtiles_bin, "convert",
             source_laz,
             "--out", self.output_tiles_dir,
             "--overwrite",
             "--classification",
+            "--jobs", str(settings.PY3DTILES_JOBS),
+            "--cache_size", str(settings.PY3DTILES_CACHE_SIZE_MB),
         ]
         env = os.environ.copy()
         env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
