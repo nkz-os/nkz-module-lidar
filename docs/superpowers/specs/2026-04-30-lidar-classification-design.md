@@ -129,9 +129,10 @@ Append these as form fields in the upload FormData: `classification_mode: native
 
 ---
 
-## 5. Inter-Module Data Contract
 
-LiDAR layers are Orion-LD `DigitalAsset` entities. Any module (hydrology, vegetation, risks, intelligence…) can discover and consume them via standard NGSI-LD queries.
+## 5. Inter-Module Data Contract (IMPLEMENTED — verified 2026-05-04)
+
+LiDAR layers are Orion-LD `DigitalAsset` entities. Any module (Vegetation, Risks, Cadastral, Robotics, BioOrchestrator, GIS-Routing, EU-Elevation...) can discover and consume them via standard NGSI-LD queries.
 
 ### 5.1 Discovery
 
@@ -139,56 +140,146 @@ LiDAR layers are Orion-LD `DigitalAsset` entities. Any module (hydrology, vegeta
 GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&refAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
 ```
 
-Response is an array of NGSI-LD entities with these attributes:
+The response is an array of NGSI-LD entities with these attributes:
 
 | Attribute | Type | Description | Use Case |
 |-----------|------|-------------|----------|
 | `resourceURL` | Property (string) | URL to tileset.json (3D Tiles, Cesium-compatible) | 3D visualization |
+| `dtmUrl` | Property (string) | GeoTIFF — Digital Terrain Model (bare-earth elevation) | Hydrology, slope, path planning |
+| `dsmUrl` | Property (string) | GeoTIFF — Digital Surface Model (canopy+buildings) | Roughness, line-of-sight |
+| `chmUrl` | Property (string) | GeoTIFF — Canopy Height Model (DSM minus DTM) | Biomass, vigor, vegetation analysis |
+| `classifiedLazUrl` | Property (string) | LAZ — classified+cropped point cloud | Custom PDAL pipelines, structural analysis |
 | `source` | Property (string) | `"PNOA"` or `"user_upload"` | Data quality assessment |
-| `pointCount` | Property (integer) | Number of points | Performance estimation |
-| `dateObserved` | Property (ISO 8601) | Flight date | Temporal comparison |
-| `processingStatus` | Property (string) | `"completed"` when ready | Readiness check |
+| `pointCount` | Property (integer) | Number of points in the layer | Performance estimation |
+| `treeCount` | Property (integer) | Number of detected trees (0 if tree detection off) | Inventory |
+| `dateObserved` | Property (ISO 8601) | Flight/acquisition date | Temporal comparison |
+| `processingStatus` | Property (string) | `"completed"` when ready | Readiness gate |
 | `refAgriParcel` | Relationship | Link to AgriParcel entity | Spatial context |
 
-### 5.2 Raw Point Cloud Access (for hydrology, DTM, analysis)
+### 5.2 Download / Export API
 
-For modules that need raw XYZ data (not just visualization tiles), the LiDAR module will expose:
+Derived products (DTM, DSM, CHM, classified LAZ) are generated during
+ingestion and persisted in MinIO alongside the 3D Tiles tileset. They
+are available as soon as `processingStatus == "completed"` — no
+reprocessing needed.
 
 ```http
-GET /api/lidar/export/{layer_id}/dtm?resolution=1.0       # DTM GeoTIFF (ground points only)
-GET /api/lidar/export/{layer_id}/dsm?resolution=1.0       # DSM GeoTIFF (first returns)
-GET /api/lidar/export/{layer_id}/chm?resolution=1.0       # CHM GeoTIFF (DSM - DTM)
-GET /api/lidar/export/{layer_id}/points?class=2           # Raw points as LAZ (filtered by LAS class)
-GET /api/lidar/export/{layer_id}/contours?interval=1.0    # Contour lines as GeoJSON
+GET /api/lidar/export/{layer_id}/dtm     → GeoTIFF  (0.5 m, IDW from class 2 ground points)
+GET /api/lidar/export/{layer_id}/dsm     → GeoTIFF  (0.5 m, max-return surface)
+GET /api/lidar/export/{layer_id}/chm     → GeoTIFF  (0.5 m, DSM minus DTM = canopy height)
+GET /api/lidar/export/{layer_id}/points  → LAZ      (classified, cropped to parcel boundary)
 ```
 
-These endpoints are **read-only** and generate the output on-demand from the cached source LAZ in MinIO. They are scoped to the tenant via `X-Tenant-ID` header.
+- **Auth:** cookie-based session (`credentials: 'include'`) via `nkz_token`
+- **CORS:** allowed from `nekazari.robotika.cloud`
+- **Cache:** `Cache-Control: public, max-age=86400`
+- **`{layer_id}`**: the UUID portion of the DigitalAsset id (after `urn:ngsi-ld:DigitalAsset:`). This is the same value the frontend uses as `selectedLayerId`.
 
-### 5.3 Agent Instructions for Cross-Module Integration
+**Error codes:**
+- `404` — layer not found, processing not complete, or product unavailable (layers from before 2026-05-04 lack derived products)
+- `403` — tenant does not own the layer
+- `400` — unknown product key (valid: `dtm`, `dsm`, `chm`, `points`)
 
-When building a module that consumes LiDAR data, an agent should:
+### 5.3 Complete Integration Example — Vegetation Module
 
-1. **Query Orion-LD for available layers:**
-   ```python
-   client = get_orion_client(tenant_id)
-   layers = client.list_assets(parcel_id=parcel_id)
-   # Filter by assetCategory == "LiDAR" and processingStatus == "completed"
-   ```
+This is the canonical pattern for consuming LiDAR data from another module:
 
-2. **For 3D visualization:** pass `resourceURL` directly to Cesium `Cesium3DTileset.fromUrl()`.
+```python
+import httpx
 
-3. **For analysis/raster data:** call the `/api/lidar/export/` endpoints. The `source` attribute tells you if data is public PNOA (higher point density, pre-classified) or user drone (varies).
 
-4. **Tenant isolation:** always include `NGSILD-Tenant` or `X-Tenant-ID` header. Orion-LD returns only the tenant's own entities.
+def _prop(entity: dict, key: str, default=None):
+    """Extract an NGSI-LD Property value."""
+    v = entity.get(key, {})
+    return v.get("value", default) if isinstance(v, dict) else default
 
-5. **Error handling:** DigitalAsset may have `processingStatus: "failed"` — skip those. Check `pointCount` to estimate processing cost before requesting export.
+
+async def get_lidar_chm(tenant_id: str, parcel_id: str) -> bytes | None:
+    """Return the CHM GeoTIFF for the most recent LiDAR layer on a parcel."""
+    base = "https://nkz.robotika.cloud"
+    async with httpx.AsyncClient() as client:
+        # 1. Discover layers via Orion-LD
+        q = f'assetCategory=="LiDAR";refAgriParcel=="urn:ngsi-ld:AgriParcel:{parcel_id}"'
+        resp = await client.get(
+            f"{base}/ngsi-ld/v1/entities",
+            params={"type": "DigitalAsset", "q": q, "limit": 10},
+            headers={"Accept": "application/ld+json"},
+        )
+        resp.raise_for_status()
+        layers = resp.json()
+
+        # 2. Filter to completed layers only
+        completed = [
+            e for e in layers
+            if _prop(e, "processingStatus") == "completed"
+        ]
+        if not completed:
+            return None
+
+        # 3. Pick the most recent
+        completed.sort(key=lambda e: _prop(e, "dateObserved", ""), reverse=True)
+        layer_id = completed[0]["id"].split(":")[-1]
+
+        # 4. Fetch the CHM
+        chm_resp = await client.get(
+            f"{base}/api/lidar/export/{layer_id}/chm",
+        )
+        chm_resp.raise_for_status()
+        return chm_resp.content  # GeoTIFF bytes — open with rasterio
+```
+
+### 5.4 Discoverability from a module frontend (JavaScript/TypeScript)
+
+```typescript
+// Query Orion-LD for LiDAR layers on the currently-selected parcel
+const { data: assets } = await apiGateway.get('/ngsi-ld/v1/entities', {
+  params: {
+    type: 'DigitalAsset',
+    q: `assetCategory=="LiDAR";refAgriParcel=="${selectedEntityId}"`,
+    limit: 10,
+  },
+  headers: { Accept: 'application/ld+json' },
+});
+
+// Each asset contains download URLs directly:
+for (const asset of assets) {
+  console.log(asset.resourceURL?.value);        // 3D Tiles for Cesium
+  console.log(asset.chmUrl?.value);             // CHM GeoTIFF
+  console.log(asset.classifiedLazUrl?.value);   // Classified point cloud
+}
+```
+
+### 5.5 Agent Instructions
+
+When building a module that consumes LiDAR data:
+
+1. **Query Orion-LD for available layers** — see example in §5.3.
+2. **For 3D visualization** — pass `resourceURL` directly to
+   `Cesium.Cesium3DTileset.fromUrl()`.
+3. **For analysis** — use `dtmUrl`/`dsmUrl`/`chmUrl`/`classifiedLazUrl`
+   directly. They point to MinIO via the public-read bucket. No further
+   API call is needed beyond the initial Orion query.
+4. **Tenant isolation** — always include `NGSILD-Tenant` header on Orion
+   requests. Export endpoints use cookie auth.
+5. **Error handling** — skip layers with `processingStatus != "completed"`.
+   The `dtmUrl` and similar attributes may be absent on layers created
+   before 2026-05-04.
 
 ---
 
-## 6. Out of Scope (v2)
+## 6. Out of Scope / Pending
 
-- True per-cell vertical density percentiles (needs tile-level compute in py3dtiles or a post-processing pass)
-- Temporal comparison (two-layer diff)
-- Slope/aspect/hillshade from DTM
-- Crown polygon export (already partially implemented in Phase C, not wired to UI)
-- Export endpoints (defined above as contract, implementation deferred to hydrology module integration)
+- **Contour lines** — `GET /export/{id}/contours` not yet implemented.
+- **Per-class point filtering** — the export endpoint returns the full
+  classified LAZ; the caller filters client-side.
+- **On-the-fly resolution control** — DTM/DSM/CHM are generated at 0.5 m
+  resolution during ingestion. A `?resolution=` query param may be added
+  if needed.
+- **Multi-layer temporal diff** — two DigitalAssets for the same parcel
+  can already be retrieved; a dedicated differencing endpoint is deferred.
+- **HeightAboveGround / CanopyCover / VerticalDensity viewer modes** —
+  blocked on py3dtiles upgrade for `--extra-fields` support.
+- **Upload classification modal** (native vs auto vs detect) — spec §2.3,
+  not yet wired to UI.
+- **Inline legend** in LidarLayerControl — spec §2.2, pending frontend work.
+- **True per-cell vertical density percentiles** — needs tile-level stats.
