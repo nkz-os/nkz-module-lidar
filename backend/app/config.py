@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # Target point budget after decimation when guardrail is triggered.
     TILING_TARGET_POINTS: int = 2_500_000
 
+    # Extra LAS dimensions to preserve through py3dtiles for Cesium styling
+    PY3DTILES_EXTRA_FIELDS: list = ["Classification", "ReturnNumber", "NumberOfReturns", "HeightAboveGround"]
+
     # Worker settings
     WORKER_QUEUE_NAME: str = "lidar-processing"
     WORKER_TIMEOUT: int = 1800  # 30 minutes max per job

@@ -129,11 +129,11 @@ class LidarPipeline:
             self.update_job_status("processing", 10, "Downloading and cropping point cloud...")
             self.phase_a_ingest(laz_url, geometry_wkt, config.get("source_crs"))
             
-            # Phase B: Spectral Fusion (if NDVI source provided)
+            # Phase B: Spectral Fusion (if NDVI source provided and color mode is rgb)
             ndvi_url = config.get("ndvi_source_url")
             colorize_by = config.get("colorize_by", "height")
-            
-            if colorize_by == "ndvi" and ndvi_url:
+
+            if colorize_by == "rgb" and ndvi_url:
                 self.update_job_status("processing", 30, "Applying NDVI colorization...")
                 self.phase_b_spectral_fusion(ndvi_url)
             else:
@@ -256,7 +256,55 @@ class LidarPipeline:
                 raise ValueError("The provided LAZ file contains 0 valid points even without cropping.")
 
         logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
-    
+
+        # Compute HeightAboveGround for every point (required for canopy analysis)
+        # Auto-classify if the input lacks classification (common for drone uploads)
+        needs_classification = False
+        try:
+            with laspy.open(self.cropped_laz) as reader:
+                las = reader.read()
+                if hasattr(las, 'classification'):
+                    unique_classes = set(int(c) for c in las.classification)
+                    needs_classification = len(unique_classes) <= 1 and 0 in unique_classes
+                else:
+                    needs_classification = True
+        except Exception:
+            needs_classification = True
+
+        if needs_classification:
+            logger.info("Input lacks classification — auto-classifying with PDAL smrf")
+            hag_pipeline = {
+                "pipeline": [
+                    {"type": "readers.las", "filename": self.cropped_laz},
+                    {"type": "filters.smrf"},
+                    {"type": "filters.hag_nn"},
+                    {
+                        "type": "writers.las",
+                        "filename": self.cropped_laz,
+                        "compression": "laszip",
+                        "extra_dims": "HeightAboveGround=float",
+                    },
+                ]
+            }
+            pdal.Pipeline(json.dumps(hag_pipeline)).execute()
+            logger.info("Auto-classification and HAG complete")
+        else:
+            # Already classified — just run HAG (smrf is not needed and may fail on some LAS files)
+            hag_pipeline = {
+                "pipeline": [
+                    {"type": "readers.las", "filename": self.cropped_laz},
+                    {"type": "filters.hag_nn"},
+                    {
+                        "type": "writers.las",
+                        "filename": self.cropped_laz,
+                        "compression": "laszip",
+                        "extra_dims": "HeightAboveGround=float",
+                    },
+                ]
+            }
+            pdal.Pipeline(json.dumps(hag_pipeline)).execute()
+            logger.info("HAG computed on pre-classified data")
+
     def phase_b_spectral_fusion(self, ndvi_raster_url: str):
         """
         Phase B: Colorize points with NDVI values from a GeoTIFF.
@@ -344,8 +392,7 @@ class LidarPipeline:
         dtm_pipeline = {
             "pipeline": [
                 {"type": "readers.las", "filename": source_laz},
-                {"type": "filters.smrf"},  # Ground classification
-                {"type": "filters.range", "limits": "Classification[2:2]"},  # Ground only
+                {"type": "filters.range", "limits": "Classification[2:2]"},  # Ground only (smrf already ran in Phase A if needed)
                 {
                     "type": "writers.gdal",
                     "filename": dtm_path,
@@ -542,26 +589,19 @@ class LidarPipeline:
         # Adaptive decimation guardrail: prevent OOM on dense clouds
         source_laz = self._prepare_tiling_input(source_laz)
 
-        # Use py3dtiles command line (more reliable than Python API for large files)
-        # Resolve full path - subprocess may not inherit conda PATH
-        py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
-        cmd = [
-            py3dtiles_bin, "convert",
-            source_laz,
-            "--out", self.output_tiles_dir,
-            "--overwrite"
-        ]
+        # Use py3dtiles Python API with classification + RGB preservation.
+        # Note: py3dtiles 7.0.0 only supports rgb/classification booleans —
+        # arbitrary extra fields (ReturnNumber, HeightAboveGround) require
+        # a newer py3dtiles version with batch table injection support.
+        from py3dtiles.convert import convert
 
-        logger.info(f"Running: {' '.join(cmd)}")
-        env = os.environ.copy()
-        env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
-        env["PROJ_DATA"] = env.get("PROJ_DATA", "/opt/conda/share/proj")
-        env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=settings.PY3DTILES_TIMEOUT, env=env)
-        
-        if result.returncode != 0:
-            logger.error(f"py3dtiles failed: {result.stderr}")
-            raise RuntimeError(f"py3dtiles conversion failed: {result.stderr}")
+        convert(
+            files=source_laz,
+            outfolder=self.output_tiles_dir,
+            overwrite=True,
+            rgb=True,
+            classification=True,
+        )
         
         # Verify tileset.json was created
         tileset_path = os.path.join(self.output_tiles_dir, "tileset.json")

@@ -43,7 +43,7 @@ lidar_job_duration = Histogram(
 
 class ProcessingConfig(BaseModel):
     """Configuration for LiDAR processing job."""
-    colorize_by: str = Field(default="height", description="Color mode: height, ndvi, rgb, classification")
+    colorize_by: str = Field(default="height", description="Color mode: height, classification, heightAboveGround, canopyCover, verticalDensity, rgb")
     detect_trees: bool = Field(default=False, description="Enable tree segmentation")
     tree_min_height: float = Field(default=2.0, description="Minimum tree height in meters")
     tree_search_radius: float = Field(default=3.0, description="Tree crown search radius in meters")
@@ -447,6 +447,11 @@ async def upload_laz_file(
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
     config: str = Form(default="{}", description="Processing config as JSON string"),
     source_crs: Optional[str] = Form(None, description="Optional source CRS override (e.g. EPSG:25830+5782)"),
+    classification_mode: Optional[str] = Form(
+        default="detect",
+        description="native=use file classes, auto=always recompute, detect=auto if missing"
+    ),
+    has_rgb: Optional[bool] = Form(default=True, description="Whether the LAZ has RGB color data"),
     current_user: dict = Depends(require_auth),
     tenant_id: str = Depends(get_tenant_id)
 ):
@@ -531,6 +536,8 @@ async def upload_laz_file(
             "uploaded_file_path": s3_key,
             "source": "user_upload",
             "source_crs": source_crs,
+            "classification_mode": classification_mode,
+            "has_rgb": has_rgb,
         }
         job_entity_id = await get_orion_client(tenant_id).create_processing_job(
             job_id=job_id,
