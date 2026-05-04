@@ -54,14 +54,20 @@ class Settings(BaseSettings):
     # Target point budget after decimation when guardrail is triggered.
     TILING_TARGET_POINTS: int = 2_500_000
 
-    # Extra LAS dimensions to preserve through py3dtiles for Cesium styling
+    # Extra LAS dimensions reserved for the eventual py3dtiles upgrade.
+    # py3dtiles 7.0.0 (currently pinned) ignores anything beyond rgb and
+    # classification; this list is consulted by the convert step once
+    # --extra-fields lands in a future release.
     PY3DTILES_EXTRA_FIELDS: list = ["Classification", "ReturnNumber", "NumberOfReturns", "HeightAboveGround"]
 
-    # Worker settings
+    # Worker settings.
+    # PY3DTILES_TIMEOUT must be strictly less than WORKER_TIMEOUT so a
+    # stuck subprocess raises subprocess.TimeoutExpired (clean failure
+    # path with an Orion job_status update) before RQ kills the entire
+    # work-horse, which loses the failure context.
     WORKER_QUEUE_NAME: str = "lidar-processing"
-    WORKER_TIMEOUT: int = 1800  # 30 minutes max per job
-    # External converter timeout (py3dtiles). Keep below/near worker timeout guardrail.
-    PY3DTILES_TIMEOUT: int = 5400  # 90 minutes
+    WORKER_TIMEOUT: int = 1800        # 30 min — RQ job_timeout
+    PY3DTILES_TIMEOUT: int = 1500     # 25 min — subprocess.run timeout
 
     # Security
     CORS_ORIGINS: str = "http://localhost:3000"
