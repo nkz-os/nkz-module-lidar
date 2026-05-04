@@ -38,46 +38,49 @@ interface LidarLayerProps {
   viewer?: CesiumViewerType;
 }
 
-// Color ramps for different visualization modes
-const COLOR_RAMPS: Record<string, string> = {
-  // Height: Blue (low) → Cyan → Green → Yellow → Red (high)
+// Color ramps for different visualization modes.
+//
+// The Cesium 3D Tiles Styling Language is a single-expression subset.
+// It accepts color() / rgba() / hsla() constructors, mix(), clamp(), the
+// ternary operator and the conditions[] form. It does NOT accept variable
+// declarations (var/float/vec3/vec4) or block statements (if/else),
+// despite their resemblance to GLSL or JavaScript. Earlier revisions used
+// GLSL-style code and silently failed to parse, leaving every tileset
+// rendered with the default white style.
+type StyleColor = string | { conditions: [string, string][] };
+
+const COLOR_RAMPS: Record<string, StyleColor> = {
+  // Height: blue (low) → green (mid) → red (high), measured along the
+  // tile-local Z axis clamped to a 0–50 m relative window.
   height: `
-    float t = clamp((\${POSITION}[2] - 0.0) / 50.0, 0.0, 1.0);
-    float r = t < 0.5 ? 0.0 : (t - 0.5) * 2.0;
-    float g = t < 0.5 ? t * 2.0 : 2.0 - t * 2.0;
-    float b = 1.0 - t;
-    color(r, g, b, 1.0)
+    \${POSITION}[2] < 25.0
+      ? mix(color('blue'), color('green'), clamp(\${POSITION}[2] / 25.0, 0.0, 1.0))
+      : mix(color('green'), color('red'), clamp((\${POSITION}[2] - 25.0) / 25.0, 0.0, 1.0))
   `,
 
-  // NDVI: Red (unhealthy) → Yellow → Green (healthy)
+  // NDVI: red (unhealthy) → yellow (neutral) → green (healthy).
+  // Negative NDVI is clamped to 0 to keep the gradient monotonic.
   ndvi: `
-    float ndvi = clamp(\${NDVI}, -1.0, 1.0);
-    float r = clamp(1.0 - ndvi, 0.0, 1.0);
-    float g = clamp(ndvi, 0.0, 1.0);
-    color(r, g, 0.0, 1.0)
+    \${NDVI} < 0.5
+      ? mix(color('red'), color('yellow'), clamp(\${NDVI} * 2.0, 0.0, 1.0))
+      : mix(color('yellow'), color('green'), clamp((\${NDVI} - 0.5) * 2.0, 0.0, 1.0))
   `,
 
-  // RGB: True color from point cloud
-  rgb: `
-    vec4 c = \${COLOR};
-    color(c.r, c.g, c.b, 1.0)
-  `,
+  // RGB: native point colors as preserved by py3dtiles convert (default).
+  rgb: '${COLOR}',
 
-  // Classification: Standard LiDAR classification colors
-  classification: `
-    var class = \${Classification};
-    if (class == 2.0) { // Ground
-      color(0.6, 0.4, 0.2, 1.0)
-    } else if (class == 3.0 || class == 4.0 || class == 5.0) { // Vegetation
-      color(0.0, 0.8, 0.2, 1.0)
-    } else if (class == 6.0) { // Building
-      color(0.8, 0.0, 0.0, 1.0)
-    } else if (class == 9.0) { // Water
-      color(0.0, 0.4, 0.8, 1.0)
-    } else {
-      color(0.5, 0.5, 0.5, 1.0)
-    }
-  `,
+  // Classification: standard ASPRS LAS class palette. py3dtiles is invoked
+  // with --classification so the Classification dimension reaches the
+  // batch table.
+  classification: {
+    conditions: [
+      ['${Classification} === 2', "color('saddlebrown')"],
+      ['${Classification} >= 3 && ${Classification} <= 5', "color('forestgreen')"],
+      ['${Classification} === 6', "color('crimson')"],
+      ['${Classification} === 9', "color('royalblue')"],
+      ['true', "color('lightgray')"],
+    ],
+  },
 };
 
 export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) => {
