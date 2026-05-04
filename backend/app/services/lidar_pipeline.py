@@ -634,7 +634,14 @@ class LidarPipeline:
                     box[2] = (xyz_range["z_max"] + xyz_range["z_min"]) / 2
 
     def _read_pnts_xyz_range(self, pnts_path: str) -> Optional[dict]:
-        """Read XYZ coordinate ranges from a .pnts file."""
+        """Read XYZ coordinate ranges from a .pnts file.
+
+        Handles both quantized (uint16[3], 6 bytes/point) and unquantized
+        (float32[3], 12 bytes/point) position formats, detected from the
+        Feature Table JSON. py3dtiles 7.x emits quantized .pnts by default;
+        reading them as float32 yields garbage that propagates into the
+        post-fix bounding volumes and breaks Cesium frustum culling.
+        """
         try:
             with open(pnts_path, "rb") as f:
                 data = f.read()
@@ -646,22 +653,49 @@ class LidarPipeline:
             if pts_count == 0:
                 return None
 
-            pos_off = fj_start + feature_json_len
-            # Read first 100 points and last 100 to estimate range
+            body_start = fj_start + feature_json_len
+
+            pos_quantized = fj.get("POSITION_QUANTIZED")
+            pos_float = fj.get("POSITION")
+
+            if pos_quantized is not None:
+                stride = 6
+                q_offset = fj.get("QUANTIZED_VOLUME_OFFSET", [0.0, 0.0, 0.0])
+                q_scale = fj.get("QUANTIZED_VOLUME_SCALE", [1.0, 1.0, 1.0])
+                accessor = pos_quantized if isinstance(pos_quantized, dict) else {}
+                pos_start = body_start + accessor.get("byteOffset", 0)
+
+                def read_point(off):
+                    x_q, y_q, z_q = struct.unpack("<HHH", data[off : off + 6])
+                    return (
+                        x_q * q_scale[0] + q_offset[0],
+                        y_q * q_scale[1] + q_offset[1],
+                        z_q * q_scale[2] + q_offset[2],
+                    )
+            elif pos_float is not None:
+                stride = 12
+                accessor = pos_float if isinstance(pos_float, dict) else {}
+                pos_start = body_start + accessor.get("byteOffset", 0)
+
+                def read_point(off):
+                    return struct.unpack("<fff", data[off : off + 12])
+            else:
+                logger.debug("No POSITION or POSITION_QUANTIZED in Feature Table")
+                return None
+
             sample_count = min(100, pts_count)
             xs, ys, zs = [], [], []
 
             for i in range(sample_count):
-                off = pos_off + i * 12
-                x, y, z = struct.unpack("<fff", data[off : off + 12])
+                x, y, z = read_point(pos_start + i * stride)
                 xs.append(x); ys.append(y); zs.append(z)
 
             if pts_count > sample_count * 2:
                 for i in range(max(0, pts_count - sample_count), pts_count):
-                    off = pos_off + i * 12
-                    if off + 12 > len(data):
+                    off = pos_start + i * stride
+                    if off + stride > len(data):
                         break
-                    x, y, z = struct.unpack("<fff", data[off : off + 12])
+                    x, y, z = read_point(off)
                     xs.append(x); ys.append(y); zs.append(z)
 
             return {
