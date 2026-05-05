@@ -9,8 +9,9 @@
  */
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useTheme } from '@nekazari/design-tokens';
+import { Spinner } from '@nekazari/ui-kit';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
-import { Loader2 } from 'lucide-react';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Cesium types are loaded globally by the host at runtime.
@@ -18,57 +19,80 @@ import { Loader2 } from 'lucide-react';
 type CesiumViewerType = any;
 type CesiumTilesetType = any;
 
+/**
+ * Get the Cesium viewer from the host's ViewerContext.
+ * The host exposes window.__nekazariViewerContextInstance which holds cesiumViewer.
+ * This is the canonical way for IIFE modules to access the Cesium viewer.
+ */
+function useCesiumViewer(): CesiumViewerType | null {
+  try {
+    const React = (window as any).React;
+    const ctx = React.useContext((window as any).__nekazariViewerContextInstance);
+    return ctx?.cesiumViewer ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface LidarLayerProps {
   viewer?: CesiumViewerType;
 }
 
-// Color ramps for different visualization modes
-const COLOR_RAMPS: Record<string, string> = {
-  // Height: Blue (low) -> Green -> Yellow -> Red (high)
+// Color ramps for different visualization modes.
+//
+// The Cesium 3D Tiles Styling Language is a single-expression subset.
+// It accepts color() / rgba() / hsla() constructors, mix(), clamp(), the
+// ternary operator and the conditions[] form. It does NOT accept variable
+// declarations (var/float/vec3/vec4) or block statements (if/else),
+// despite their resemblance to GLSL or JavaScript. Earlier revisions used
+// GLSL-style code and silently failed to parse, leaving every tileset
+// rendered with the default white style.
+type StyleColor = string | { conditions: [string, string][] };
+
+const COLOR_RAMPS: Record<string, StyleColor> = {
+  // Height: blue (low) → green (mid) → red (high), measured along the
+  // tile-local Z axis clamped to a 0–50 m relative window.
   height: `
-    var height = \${POSITION}[2];
-    var normalized = clamp((height - 0.0) / 50.0, 0.0, 1.0);
-    color(
-      mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), normalized),
-      1.0
-    )
+    \${POSITION}[2] < 25.0
+      ? mix(color('blue'), color('green'), clamp(\${POSITION}[2] / 25.0, 0.0, 1.0))
+      : mix(color('green'), color('red'), clamp((\${POSITION}[2] - 25.0) / 25.0, 0.0, 1.0))
   `,
 
-  // NDVI: Red (unhealthy) -> Yellow -> Green (healthy)
+  // NDVI: red (unhealthy) → yellow (neutral) → green (healthy).
+  // Negative NDVI is clamped to 0 to keep the gradient monotonic.
   ndvi: `
-    var ndvi = \${NDVI};
-    var r = (ndvi < 0.5) ? 1.0 : (1.0 - ndvi) * 2.0;
-    var g = (ndvi > 0.5) ? 1.0 : ndvi * 2.0;
-    color(r, g, 0.0, 1.0)
+    \${NDVI} < 0.5
+      ? mix(color('red'), color('yellow'), clamp(\${NDVI} * 2.0, 0.0, 1.0))
+      : mix(color('yellow'), color('green'), clamp((\${NDVI} - 0.5) * 2.0, 0.0, 1.0))
   `,
 
-  // RGB: Use original point colors
-  rgb: `
-    color(\${COLOR})
-  `,
+  // RGB: native point colors as preserved by py3dtiles convert (default).
+  rgb: '${COLOR}',
 
-  // Classification: Standard LiDAR classification colors
-  classification: `
-    var class = \${Classification};
-    if (class == 2.0) { // Ground
-      color(0.6, 0.4, 0.2, 1.0)
-    } else if (class == 3.0 || class == 4.0 || class == 5.0) { // Vegetation
-      color(0.0, 0.8, 0.2, 1.0)
-    } else if (class == 6.0) { // Building
-      color(0.8, 0.0, 0.0, 1.0)
-    } else if (class == 9.0) { // Water
-      color(0.0, 0.4, 0.8, 1.0)
-    } else {
-      color(0.5, 0.5, 0.5, 1.0)
-    }
-  `,
+  // Classification: standard ASPRS LAS class palette. py3dtiles is invoked
+  // with --classification so the Classification dimension reaches the
+  // batch table.
+  classification: {
+    conditions: [
+      ['${Classification} === 2', "color('saddlebrown')"],
+      ['${Classification} >= 3 && ${Classification} <= 5', "color('forestgreen')"],
+      ['${Classification} === 6', "color('crimson')"],
+      ['${Classification} === 9', "color('royalblue')"],
+      ['true', "color('lightgray')"],
+    ],
+  },
 };
 
-export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
-  const { activeTilesetUrl, colorMode } = useLidarContext();
+export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) => {
+  const { activeTilesetUrl, colorMode, heightOffset } = useLidarContext();
   const tilesetRef = useRef<CesiumTilesetType | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const theme = useTheme();
+
+  // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
+  const contextViewer = useCesiumViewer();
+  const viewer = viewerProp || contextViewer;
 
   /**
    * Create style expression for current color mode
@@ -81,7 +105,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
     try {
       return new Cesium.Cesium3DTileStyle({
         color: COLOR_RAMPS[mode] || COLOR_RAMPS.height,
-        pointSize: 3,
+        pointSize: 5,
       });
     } catch (error) {
       console.error('[LidarLayer] Error creating style:', error);
@@ -93,11 +117,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
    * Load 3D Tiles tileset
    */
   useEffect(() => {
-    if (!viewer) return;
+    console.log('[LidarLayer] viewer:', !!viewer, 'url:', activeTilesetUrl);
+    if (!viewer) { console.warn('[LidarLayer] No viewer prop'); return; }
 
     // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
     if (!Cesium) {
+      console.warn('[LidarLayer] Cesium not available');
       setLoadError('CesiumJS not available');
       return;
     }
@@ -109,11 +135,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
     }
 
     if (!activeTilesetUrl) {
+      console.log('[LidarLayer] No active tileset URL');
       setIsLoading(false);
       setLoadError(null);
       return;
     }
 
+    console.log('[LidarLayer] Loading:', activeTilesetUrl.substring(0, 80) + '...');
     setIsLoading(true);
 
     const loadTileset = async () => {
@@ -131,6 +159,23 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
           tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, options);
         } else {
           tileset = new Cesium.Cesium3DTileset({ url: activeTilesetUrl, ...options });
+        }
+
+        // Apply height offset to compensate for orthometric→ellipsoidal datum difference
+        if (heightOffset !== 0 && tileset.boundingSphere) {
+          try {
+            const center = tileset.boundingSphere.center;
+            const cartographic = Cesium.Cartographic.fromCartesian(center);
+            const offsetCenter = Cesium.Cartesian3.fromRadians(
+              cartographic.longitude,
+              cartographic.latitude,
+              cartographic.height + heightOffset
+            );
+            const translation = Cesium.Cartesian3.subtract(offsetCenter, center, new Cesium.Cartesian3());
+            tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation);
+          } catch (e) {
+            console.warn('[LidarLayer] Could not apply height offset:', e);
+          }
         }
 
         // Add to scene
@@ -192,9 +237,9 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
   // Show loading indicator while tileset loads
   if (activeTilesetUrl && isLoading) {
     return (
-      <div className="absolute bottom-4 left-4 z-50 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg border border-slate-200 flex items-center gap-2">
-        <Loader2 className="w-4 h-4 text-violet-500 animate-spin" />
-        <span className="text-sm text-slate-700">Loading point cloud...</span>
+      <div className="absolute bottom-4 left-4 z-50 bg-nkz-surface backdrop-blur-sm rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-nkz-border flex items-center gap-nkz-inline">
+        <Spinner size="sm" />
+        <span className="text-nkz-sm text-nkz-text-primary">Loading point cloud...</span>
       </div>
     );
   }
@@ -202,8 +247,8 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer }) => {
   // Show error if Cesium or loading fails
   if (loadError) {
     return (
-      <div className="absolute bottom-4 left-4 z-50 bg-red-50 rounded-lg px-3 py-2 shadow-lg border border-red-200">
-        <span className="text-sm text-red-700">{loadError}</span>
+      <div className="absolute bottom-4 left-4 z-50 bg-nkz-danger-soft rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-nkz-danger">
+        <span className="text-nkz-sm text-nkz-danger-strong">{loadError}</span>
       </div>
     );
   }

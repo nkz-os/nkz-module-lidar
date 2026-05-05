@@ -41,8 +41,10 @@ export default defineConfig({
         'react-dom',
         'react-dom/client',
         'react-router-dom',
+        '@nekazari/design-tokens',
         '@nekazari/sdk',
         '@nekazari/ui-kit',
+        '@nekazari/viewer-kit',
       ],
       output: {
         globals: {
@@ -50,8 +52,10 @@ export default defineConfig({
           'react-dom': 'ReactDOM',
           'react-dom/client': 'ReactDOM',
           'react-router-dom': 'ReactRouterDOM',
+          '@nekazari/design-tokens': '__NKZ_DESIGN_TOKENS__',
           '@nekazari/sdk': '__NKZ_SDK__',
           '@nekazari/ui-kit': '__NKZ_UI__',
+          '@nekazari/viewer-kit': '__NKZ_VIEWER_KIT__',
         },
         inlineDynamicImports: true,
       },

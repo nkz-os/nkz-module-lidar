@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.2.0] - 2026-05-04
+
+### Fixed (post-audit remediation)
+- Phase D: revert py3dtiles Python API → CLI subprocess; the Python `convert()`
+  API hung indefinitely (master at 100% CPU, ZMQ workers idle, zero tiles
+  emitted) while the CLI binary completed in <1 min on the same input.
+- Memory: cap `py3dtiles convert` with `--jobs 4 --cache_size 256` to respect
+  the 2 GiB pod limit; without caps py3dtiles uses `os.cpu_count()` and
+  `host_total_mem/10` (12 workers, 3.2 GiB cache on this host) → OOMKilled.
+- Worker name: include pod hostname + uuid suffix to avoid
+  `ValueError("There exists an active worker named ... already")` on container
+  restart; the old name was a constant which collided with the not-yet-expired
+  Redis registration of the dying container.
+- Bounding volumes: `_read_pnts_xyz_range` now detects `POSITION_QUANTIZED`
+  (uint16, 6 bytes/point) vs `POSITION` (float32, 12 bytes/point) from the
+  Feature Table JSON; py3dtiles 7.x emits quantized .pnts by default.
+- NDVI gate: Phase B spectral fusion now triggers on `colorize_by == "ndvi"`
+  instead of `"rgb"`.
+- Cesium styles: `COLOR_RAMPS` rewritten to the valid Cesium 3D Tiles Styling
+  subset (`color()`, `mix()`, ternary, `conditions[]`); previous GLSL-style
+  code (`vec4`, `var`, `if`) was silently rejected by `Cesium3DTileStyle`.
+- Build: remove dangling `import './index.css'` in App.tsx (the file was
+  deleted in the design-system v1 migration).
+
+### Removed
+- Phase A HAG computation (`filters.hag_nn`); py3dtiles 7.0.0 has no
+  `--extra-fields` flag, so HeightAboveGround was discarded during conversion.
+  Will be reinstated when py3dtiles is upgraded.
+
+### Operations
+- `PY3DTILES_TIMEOUT` (25 min) is now strictly less than `WORKER_TIMEOUT`
+  (30 min) so a stuck subprocess fails cleanly instead of being RQ-killed.
+- Worker reconciliation now plays back 21+ previously-failed jobs from the
+  queue and syncs their Orion entities to `failed`.
+
 ## [1.1.0] - 2026-04-29
 
 ### Security

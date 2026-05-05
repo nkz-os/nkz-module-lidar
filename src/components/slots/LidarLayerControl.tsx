@@ -17,7 +17,6 @@ import {
   RefreshCw,
   CheckCircle,
   XCircle,
-  Loader2,
   TreeDeciduous,
   Palette,
   Sparkles,
@@ -25,16 +24,32 @@ import {
   Database,
   Trash2,
 } from 'lucide-react';
+import { SlotShell } from '@nekazari/viewer-kit';
+import {
+  Stack,
+  Toggle,
+  Select,
+  Slider,
+  Button,
+  Badge,
+  Spinner,
+  ProgressBar,
+  Input,
+  IconButton,
+  EmptyState,
+} from '@nekazari/ui-kit';
 import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 import { lidarApi } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
 
+const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
+
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
   const context = useLidarContext();
-  
+
   // FAILSAFE: Local state to mirror context if it's stuck or non-reactive
   const [localEntityId, setLocalEntityId] = useState<string | null>(context.selectedEntityId);
 
@@ -45,7 +60,7 @@ const LidarLayerControl: React.FC = () => {
       setLocalEntityId(e.detail.id);
     };
     window.addEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
-    
+
     // Initial check from URL if current context is empty (deep links)
     if (!localEntityId) {
       const params = new URLSearchParams(window.location.search);
@@ -65,6 +80,8 @@ const LidarLayerControl: React.FC = () => {
     activeTilesetUrl,
     colorMode,
     setColorMode,
+    heightOffset,
+    setHeightOffset,
     isProcessing,
     processingJob,
     processingConfig,
@@ -86,6 +103,9 @@ const LidarLayerControl: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manualCrs, setManualCrs] = useState('');
   const [requiresManualCrs, setRequiresManualCrs] = useState(false);
+  const [uploadJobStatus, setUploadJobStatus] = useState<{ progress: number; message: string } | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; filename: string; size_bytes: number }>>([]);
+  const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -93,7 +113,7 @@ const LidarLayerControl: React.FC = () => {
     { value: 'height', label: t('color.height'), icon: '\u{1F4CF}', desc: t('color.height.desc') },
     { value: 'ndvi', label: t('color.ndvi'), icon: '\u{1F33F}', desc: t('color.ndvi.desc') },
     { value: 'rgb', label: t('color.rgb'), icon: '\u{1F3A8}', desc: t('color.rgb.desc') },
-    { value: 'classification', label: t('color.classification'), icon: '\u{1F3F7}\uFE0F', desc: t('color.classification.desc') },
+    { value: 'classification', label: t('color.classification'), icon: '\u{1F3F7}️', desc: t('color.classification.desc') },
   ];
 
   // Auto-dismiss errors after 8 seconds
@@ -118,13 +138,37 @@ const LidarLayerControl: React.FC = () => {
     }
   }, [selectedEntityGeometry, hasCoverage, checkCoverage]);
 
+  // Fetch uploaded files list on mount
+  const fetchUploads = useCallback(async () => {
+    try {
+      const result = await lidarApi.listUploads();
+      setUploadedFiles(result.uploads);
+    } catch {
+      // silently fail — uploads list is non-critical
+    }
+  }, []);
+
+  useEffect(() => { fetchUploads(); }, [fetchUploads]);
+
+  const handleDeleteUpload = async (uploadId: string) => {
+    setDeletingUploadId(uploadId);
+    try {
+      await lidarApi.deleteUpload(uploadId);
+      setUploadedFiles(prev => prev.filter(f => f.id !== uploadId));
+    } catch {
+      // silently fail
+    } finally {
+      setDeletingUploadId(null);
+    }
+  };
+
   // =========================================================================
   // Handlers
   // =========================================================================
 
   const handleStartProcessing = async () => {
     if (!selectedEntityGeometry) {
-      setErrorWithTimeout(t('errorNoGeometry', 'Entity geometry is required for PNOA download.'));
+      setErrorWithTimeout(t('errorNoGeometry'));
       return;
     }
     try {
@@ -179,12 +223,26 @@ const LidarLayerControl: React.FC = () => {
         formData.append('source_crs', manualCrs.trim());
       }
 
-      await lidarApi.uploadFile(formData);
+      const uploadResponse = await lidarApi.uploadFile(formData);
 
-      await refreshLayers();
+      // Poll until job completes (same flow as PNOA download)
+      const finalStatus = await lidarApi.pollJobStatus(
+        uploadResponse.job_id,
+        (status) => {
+          setUploadJobStatus({ progress: status.progress, message: status.status_message || '' });
+        },
+        2000,
+        300,
+      );
+
+      if (finalStatus.tileset_url) {
+        await refreshLayers();
+      }
+      setUploadJobStatus(null);
       setRequiresManualCrs(false);
       setManualCrs('');
     } catch (error: unknown) {
+      setUploadJobStatus(null);
       const msg = error instanceof Error ? error.message : t('errorUpload');
       setErrorWithTimeout(msg);
     } finally {
@@ -235,257 +293,258 @@ const LidarLayerControl: React.FC = () => {
 
   if (!selectedEntityId) {
     return (
-      <div className="lidar-module p-6 bg-white/80 backdrop-blur-sm rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center gap-3 text-center min-h-[160px]">
-        <div className="p-3 rounded-full bg-violet-50">
-          <Layers className="w-8 h-8 text-violet-400" />
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-slate-700">{t('noParcelSelected', 'No parcel selected')}</p>
-          <p className="text-xs text-slate-500 mt-1">{t('selectParcelToUpload', 'Select a parcel from the map to upload or download LiDAR data.')}</p>
-        </div>
-      </div>
+      <SlotShell moduleId="lidar" accent={lidarAccent}>
+        <EmptyState
+          icon={<Layers size={32} />}
+          title={t('noParcelSelected')}
+          description={t('selectParcelToUpload')}
+        />
+      </SlotShell>
     );
   }
 
   if (isLoadingMetadata) {
     return (
-      <div className="lidar-module p-4 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 flex flex-col items-center justify-center gap-3 min-h-[200px]">
-        <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
-        <p className="text-sm text-slate-500 font-medium">{t('loadingMetadata', 'Loading entity details...')}</p>
-      </div>
+      <SlotShell moduleId="lidar" accent={lidarAccent}>
+        <div className="flex flex-col items-center justify-center gap-nkz-stack py-nkz-section">
+          <Spinner size="md" />
+          <p className="text-nkz-sm text-nkz-text-muted font-medium">{t('loadingMetadata')}</p>
+        </div>
+      </SlotShell>
     );
   }
 
   return (
-    <div className="lidar-module" style={{ marginBottom: '12px' }}>
-    <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/60 overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-violet-50/60 to-cyan-50/60">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500">
-              <Layers className="w-4 h-4 text-white" />
-            </div>
-            LiDAR
-          </h3>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-2 rounded-lg transition-all duration-200 ${showSettings
-                ? 'bg-violet-100 text-violet-600'
-                : 'hover:bg-slate-100 text-slate-500'
-              }`}
-            title={t('settings')}
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-4 space-y-4">
+    <SlotShell
+      title="Control LiDAR"
+      icon={<Layers className="w-4 h-4" />}
+      collapsible
+      accent={lidarAccent}
+    >
+      <Stack gap="stack">
         {/* Settings Panel */}
         {showSettings && (
-          <div className="p-4 bg-slate-50 rounded-xl space-y-4 border border-slate-200 lidar-slide-in">
-            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-violet-500" />
-              {t('processingOptions')}
-            </h4>
+          <div className="bg-nkz-surface-sunken rounded-nkz-md p-nkz-stack">
+            <Stack gap="stack">
+              <h4 className="text-nkz-sm font-semibold text-nkz-text-primary flex items-center gap-nkz-inline">
+                <Sparkles className="w-4 h-4 text-nkz-accent-base" />
+                {t('processingOptions')}
+              </h4>
+              <p className="text-nkz-xs text-nkz-text-muted -mt-nkz-stack">{t('processingOptionsHint')}</p>
 
-            {/* Color Mode */}
-            <div>
-              <label className="lidar-label flex items-center gap-1 mb-2">
-                <Palette className="w-3 h-3" />
-                {t('colorization')}
-              </label>
-              <select
-                value={processingConfig.colorize_by}
-                onChange={(e) => setProcessingConfig({
-                  ...processingConfig,
-                  colorize_by: e.target.value as ColorMode
-                })}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-violet-200 focus:border-violet-400 transition-all"
-              >
-                {COLOR_MODE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.icon} {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Tree Detection Toggle */}
-            <label className="flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 cursor-pointer hover:border-violet-300 transition-all">
-              <input
-                type="checkbox"
-                checked={processingConfig.detect_trees}
-                onChange={(e) => setProcessingConfig({
-                  ...processingConfig,
-                  detect_trees: e.target.checked
-                })}
-                className="w-4 h-4 rounded text-violet-600 focus:ring-violet-500"
-              />
-              <div className="flex items-center gap-2">
-                <TreeDeciduous className="w-4 h-4 text-emerald-500" />
-                <span className="text-sm text-slate-700">{t('detectTrees')}</span>
+              {/* Color Mode */}
+              <div>
+                <label className="text-nkz-xs font-semibold uppercase tracking-wider text-nkz-text-muted flex items-center gap-nkz-tight mb-nkz-tight">
+                  <Palette className="w-3 h-3" />
+                  {t('colorization')}
+                </label>
+                <Select
+                  value={processingConfig.colorize_by}
+                  onChange={(v) => setProcessingConfig({
+                    ...processingConfig,
+                    colorize_by: v as ColorMode
+                  })}
+                  options={COLOR_MODE_OPTIONS.map(opt => ({
+                    value: opt.value,
+                    label: `${opt.icon} ${opt.label}`
+                  }))}
+                  size="sm"
+                />
               </div>
-            </label>
 
-            {/* Tree Detection Options */}
-            {processingConfig.detect_trees && (
-              <div className="ml-4 pl-4 border-l-2 border-emerald-200 space-y-3 lidar-slide-in">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">{t('minHeight')}</label>
-                  <input
-                    type="number"
-                    value={processingConfig.tree_min_height}
-                    onChange={(e) => setProcessingConfig({
-                      ...processingConfig,
-                      tree_min_height: parseFloat(e.target.value) || 2.0
-                    })}
-                    min={0.5}
-                    max={20}
-                    step={0.5}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">{t('searchRadius')}</label>
-                  <input
-                    type="number"
-                    value={processingConfig.tree_search_radius}
-                    onChange={(e) => setProcessingConfig({
-                      ...processingConfig,
-                      tree_search_radius: parseFloat(e.target.value) || 3.0
-                    })}
-                    min={1}
-                    max={10}
-                    step={0.5}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-200"
-                  />
-                </div>
+              {/* Tree Detection Toggle */}
+              <div className="bg-nkz-surface rounded-nkz-md p-nkz-inline border border-nkz-border">
+                <Toggle
+                  checked={processingConfig.detect_trees}
+                  onChange={(v) => setProcessingConfig({
+                    ...processingConfig,
+                    detect_trees: v
+                  })}
+                  label={t('detectTrees')}
+                />
               </div>
-            )}
+
+              {/* Tree Detection Options */}
+              {processingConfig.detect_trees && (
+                <div className="ml-nkz-inline pl-nkz-inline border-l-2 border-nkz-success space-y-nkz-stack">
+                  <div>
+                    <label className="text-nkz-xs text-nkz-text-muted block mb-nkz-tight">{t('minHeight')}</label>
+                    <Input
+                      type="number"
+                      value={processingConfig.tree_min_height}
+                      onChange={(e) => setProcessingConfig({
+                        ...processingConfig,
+                        tree_min_height: parseFloat(e.target.value) || 2.0
+                      })}
+                      size="sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-nkz-xs text-nkz-text-muted block mb-nkz-tight">{t('searchRadius')}</label>
+                    <Input
+                      type="number"
+                      value={processingConfig.tree_search_radius}
+                      onChange={(e) => setProcessingConfig({
+                        ...processingConfig,
+                        tree_search_radius: parseFloat(e.target.value) || 3.0
+                      })}
+                      size="sm"
+                    />
+                  </div>
+                </div>
+              )}
+            </Stack>
           </div>
         )}
 
         {/* Processing Status */}
         {isProcessing && processingJob && (
-          <div className="p-4 rounded-xl bg-gradient-to-br from-violet-50 to-cyan-50 border border-violet-200 lidar-pulse">
-            <div className="flex items-center gap-2 mb-3">
-              <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
-              <span className="text-sm font-semibold text-violet-900">
-                {t('processing')}
-              </span>
-            </div>
-            <div className="lidar-progress mb-2">
-              <div
-                className="lidar-progress-bar"
-                style={{ width: `${processingJob.progress}%` }}
-              />
-            </div>
-            <p className="text-xs text-violet-700">
-              {processingJob.status_message || t('processingPointCloud')}
-            </p>
-            <button
-              onClick={() => cancelProcessing()}
-              className="mt-2 w-full text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
-            >
-              {t('cancelProcessing')}
-            </button>
+          <div className="bg-nkz-accent-soft rounded-nkz-md p-nkz-stack border border-nkz-accent-base">
+            <Stack gap="inline">
+              <div className="flex items-center gap-nkz-inline">
+                <Spinner size="sm" />
+                <span className="text-nkz-sm font-semibold text-nkz-accent-strong">
+                  {t('processing')}
+                </span>
+              </div>
+              <ProgressBar value={processingJob.progress} intent="default" />
+              <p className="text-nkz-xs text-nkz-accent-strong">
+                {processingJob.status_message || t('processingPointCloud')}
+              </p>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => cancelProcessing()}
+              >
+                {t('cancelProcessing')}
+              </Button>
+            </Stack>
+          </div>
+        )}
+
+        {/* Upload Processing Status */}
+        {isUploading && uploadJobStatus && (
+          <div className="bg-nkz-accent-soft rounded-nkz-md p-nkz-stack border border-nkz-accent-base">
+            <Stack gap="inline">
+              <div className="flex items-center gap-nkz-inline">
+                <Spinner size="sm" />
+                <span className="text-nkz-sm font-semibold text-nkz-accent-strong">
+                  {t('processing')}
+                </span>
+              </div>
+              <ProgressBar value={uploadJobStatus.progress} intent="default" />
+              <p className="text-nkz-xs text-nkz-accent-strong">
+                {uploadJobStatus.message || t('processingPointCloud')}
+              </p>
+            </Stack>
           </div>
         )}
 
         {/* Error Display */}
         {uploadError && (
-          <div className="lidar-status lidar-status-error lidar-slide-in">
+          <Badge intent="negative" className="flex items-center gap-nkz-tight">
             <XCircle className="w-4 h-4 flex-shrink-0" />
-            <p className="text-xs">{uploadError}</p>
-          </div>
+            <span className="text-nkz-xs">{uploadError}</span>
+          </Badge>
         )}
 
         {/* Active Layer */}
         {activeTilesetUrl && !isProcessing && (
-          <div className="space-y-3 lidar-slide-in">
-            <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="lidar-status-dot lidar-status-dot-success" />
-                <span className="text-sm font-semibold text-emerald-900">{t('activeLayer')}</span>
-              </div>
+          <div className="bg-nkz-success-soft rounded-nkz-md p-nkz-stack border border-nkz-success">
+            <Stack gap="inline">
+              <Badge intent="positive">{t('activeLayer')}</Badge>
 
               {/* Color Mode Pills */}
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-nkz-tight">
                 {COLOR_MODE_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setColorMode(opt.value)}
-                    className={`lidar-chip ${colorMode === opt.value ? 'lidar-chip-active' : 'lidar-chip-inactive'
-                      }`}
+                    className={`px-nkz-inline py-nkz-tight text-nkz-xs font-medium rounded-nkz-full transition-colors ${
+                      colorMode === opt.value
+                        ? 'bg-nkz-accent-base text-nkz-text-on-accent'
+                        : 'bg-nkz-surface-sunken text-nkz-text-secondary hover:bg-nkz-border'
+                    }`}
                     title={opt.desc}
                   >
                     {opt.icon} {opt.label}
                   </button>
                 ))}
               </div>
-            </div>
 
-            <button
-              onClick={() => refreshLayers()}
-              className="lidar-btn lidar-btn-secondary w-full flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              {t('refreshLayers')}
-            </button>
+              {/* Height offset slider */}
+              <Slider
+                value={heightOffset}
+                onChange={setHeightOffset}
+                min={-100}
+                max={20}
+                step={1}
+                label={t('heightOffset')}
+                unit="m"
+              />
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refreshLayers()}
+                leadingIcon={<RefreshCw className="w-4 h-4" />}
+              >
+                {t('refreshLayers')}
+              </Button>
+            </Stack>
           </div>
         )}
 
         {/* Source Options (when no active layer) */}
         {!activeTilesetUrl && !isProcessing && (
-          <div className="space-y-4">
+          <Stack gap="stack">
             {/* Coverage Badge */}
             {hasCoverage !== null && (
-              <div className={`lidar-coverage-badge ${hasCoverage ? 'lidar-coverage-available' : 'lidar-coverage-unavailable'
-                }`}>
+              <Badge intent={hasCoverage ? 'positive' : 'warning'}>
                 {hasCoverage ? (
-                  <>
+                  <span className="flex items-center gap-nkz-tight">
                     <CheckCircle className="w-3.5 h-3.5" />
                     {t('coverageAvailable')}
-                  </>
+                  </span>
                 ) : (
-                  <>
+                  <span className="flex items-center gap-nkz-tight">
                     <Cloud className="w-3.5 h-3.5" />
                     {t('noCoverage')}
-                  </>
+                  </span>
                 )}
-              </div>
+              </Badge>
             )}
 
             {/* Download from PNOA */}
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleStartProcessing}
               disabled={isProcessing || !hasCoverage}
-              className="lidar-btn lidar-btn-primary w-full flex items-center justify-center gap-2"
-              style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%)' }}
+              leadingIcon={<Database className="w-4 h-4" />}
             >
-              <Database className="w-4 h-4" />
-              <span>{hasCoverage ? t('downloadPnoa') : t('noCoverage')}</span>
-            </button>
+              {hasCoverage ? t('downloadPnoa') : t('noCoverage')}
+            </Button>
 
             {/* Divider */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
-              <span className="text-xs text-slate-400 font-medium">{t('or')}</span>
-              <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+            <div className="flex items-center gap-nkz-inline">
+              <div className="flex-1 h-px bg-nkz-border" />
+              <span className="text-nkz-xs text-nkz-text-muted font-medium">{t('or')}</span>
+              <div className="flex-1 h-px bg-nkz-border" />
             </div>
 
             {/* File Upload Dropzone */}
             {requiresManualCrs && (
-              <div className="p-3 rounded-lg border border-amber-300 bg-amber-50">
-                <label className="text-xs text-amber-800 block mb-1">{t('manualCrsLabel')}</label>
-                <input
-                  value={manualCrs}
-                  onChange={(e) => setManualCrs(e.target.value)}
-                  placeholder="EPSG:25830+5782"
-                  className="w-full border border-amber-300 rounded px-2 py-1 text-sm"
-                />
+              <div className="bg-nkz-warning-soft rounded-nkz-md p-nkz-stack border border-nkz-warning">
+                <Stack gap="tight">
+                  <label className="text-nkz-xs text-nkz-warning-strong">{t('manualCrsLabel')}</label>
+                  <Input
+                    value={manualCrs}
+                    onChange={(e) => setManualCrs(e.target.value)}
+                    placeholder="EPSG:25830+5782"
+                    size="sm"
+                  />
+                </Stack>
               </div>
             )}
             <div
@@ -493,7 +552,11 @@ const LidarLayerControl: React.FC = () => {
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onClick={() => fileInputRef.current?.click()}
-              className={`lidar-dropzone cursor-pointer ${isDragOver ? 'lidar-dropzone-active' : ''}`}
+              className={`border-2 border-dashed rounded-nkz-lg p-nkz-section text-center cursor-pointer transition-colors ${
+                isDragOver
+                  ? 'border-nkz-accent-base bg-nkz-accent-soft'
+                  : 'border-nkz-border hover:border-nkz-accent-base hover:bg-nkz-accent-soft'
+              }`}
             >
               <input
                 ref={fileInputRef}
@@ -502,87 +565,124 @@ const LidarLayerControl: React.FC = () => {
                 onChange={handleFileInputChange}
                 className="hidden"
               />
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center gap-nkz-inline">
                 {isUploading ? (
-                  <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+                  <Spinner size="md" />
                 ) : (
-                  <Upload className="w-8 h-8 text-violet-400" />
+                  <Upload className="w-8 h-8 text-nkz-accent-base" />
                 )}
                 <div className="text-center">
-                  <p className="text-sm font-medium text-slate-700">
+                  <p className="text-nkz-sm font-medium text-nkz-text-primary">
                     {isUploading ? t('uploading') : t('uploadLaz')}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-nkz-xs text-nkz-text-muted mt-nkz-tight">
                     {t('droneLidar')}
                   </p>
                 </div>
               </div>
             </div>
-          </div>
+          </Stack>
         )}
 
         {/* Layers List */}
         {layers.length > 0 && (
-          <div className="pt-4 border-t border-slate-100">
-            <h4 className="lidar-label mb-3 flex items-center gap-1">
-              <Layers className="w-3 h-3" />
-              {t('availableLayers')}
-            </h4>
-            <div className="space-y-2 max-h-40 overflow-y-auto lidar-scrollbar">
-              {layers.map((layer) => (
-                <div key={layer.id}>
-                  <div className="lidar-layer-item text-xs">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />
-                      <span className="text-slate-700 font-medium truncate">
-                        {layer.source}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400">
-                        {layer.point_count ? `${(layer.point_count / 1000000).toFixed(1)}M` : ''}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDeleteId(confirmDeleteId === layer.id ? null : layer.id);
-                        }}
-                        className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
-                        title={t('deleteLayer')}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                  {/* Delete confirmation */}
-                  {confirmDeleteId === layer.id && (
-                    <div className="mt-1 p-2 bg-red-50 rounded-lg border border-red-200 lidar-slide-in">
-                      <p className="text-xs text-red-700 mb-2">{t('deleteConfirm')}</p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleDeleteLayer(layer.id)}
-                          disabled={deletingLayerId === layer.id}
-                          className="flex-1 text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+          <div className="pt-nkz-stack border-t border-nkz-border">
+            <Stack gap="inline">
+              <h4 className="text-nkz-xs font-semibold uppercase tracking-wider text-nkz-text-muted flex items-center gap-nkz-tight">
+                <Layers className="w-3 h-3" />
+                {t('availableLayers')}
+              </h4>
+              <div className="flex flex-col gap-nkz-tight max-h-40 overflow-y-auto">
+                {layers.map((layer) => (
+                  <div key={layer.id}>
+                    <div className="flex items-center justify-between p-nkz-inline rounded-nkz-md bg-nkz-surface-sunken hover:bg-nkz-surface transition-colors text-nkz-xs">
+                      <div className="flex items-center gap-nkz-inline flex-1 min-w-0">
+                        <div className="w-1.5 h-1.5 rounded-full bg-nkz-accent-base flex-shrink-0" />
+                        <span className="text-nkz-sm text-nkz-text-primary font-medium truncate">
+                          {layer.source}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-nkz-inline">
+                        <span className="text-nkz-xs text-nkz-text-muted">
+                          {layer.point_count ? `${(layer.point_count / 1000000).toFixed(1)}M` : ''}
+                        </span>
+                        <IconButton
+                          aria-label={t('deleteLayer')}
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(confirmDeleteId === layer.id ? null : layer.id);
+                          }}
                         >
-                          {deletingLayerId === layer.id ? t('deleting') : t('deleteLayer')}
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="flex-1 text-xs px-2 py-1 bg-white text-slate-700 rounded border border-slate-200 hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
+                          <Trash2 className="w-3 h-3" />
+                        </IconButton>
                       </div>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                    {/* Delete confirmation */}
+                    {confirmDeleteId === layer.id && (
+                      <div className="mt-nkz-tight p-nkz-inline bg-nkz-danger-soft rounded-nkz-md border border-nkz-danger">
+                        <Stack gap="inline">
+                          <p className="text-nkz-xs text-nkz-danger-strong">{t('deleteConfirm')}</p>
+                          <div className="flex gap-nkz-inline">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => handleDeleteLayer(layer.id)}
+                              disabled={deletingLayerId === layer.id}
+                            >
+                              {deletingLayerId === layer.id ? t('deleting') : t('deleteLayer')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setConfirmDeleteId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </Stack>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Stack>
           </div>
         )}
-      </div>
-    </div>
-    </div>
+
+        {/* Uploaded Files */}
+        {uploadedFiles.length > 0 && (
+          <div className="pt-nkz-stack border-t border-nkz-border">
+            <Stack gap="inline">
+              <h4 className="text-nkz-xs font-semibold uppercase tracking-wider text-nkz-text-muted flex items-center gap-nkz-tight">
+                <Upload className="w-3 h-3" />
+                {t('uploadedFiles')}
+              </h4>
+              <div className="flex flex-col gap-nkz-tight max-h-32 overflow-y-auto">
+                {uploadedFiles.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between text-nkz-xs py-nkz-tight px-nkz-inline rounded-nkz-md hover:bg-nkz-surface-sunken">
+                    <span className="text-nkz-text-secondary truncate flex-1">{f.filename}</span>
+                    <span className="text-nkz-text-muted mx-nkz-inline">{(f.size_bytes / 1048576).toFixed(1)} MB</span>
+                    <IconButton
+                      aria-label={t('deleteLayer')}
+                      size="sm"
+                      onClick={() => handleDeleteUpload(f.id)}
+                      disabled={deletingUploadId === f.id}
+                    >
+                      {deletingUploadId === f.id ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        <Trash2 className="w-3 h-3" />
+                      )}
+                    </IconButton>
+                  </div>
+                ))}
+              </div>
+            </Stack>
+          </div>
+        )}
+      </Stack>
+    </SlotShell>
   );
 };
 

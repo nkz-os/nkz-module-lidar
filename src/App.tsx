@@ -18,7 +18,6 @@
 import React from 'react';
 import { Layers, Cpu, TreeDeciduous, Upload, Download, Eye, ArrowRight } from 'lucide-react';
 import { useTranslation } from './sdk';
-import './index.css';
 
 // Export slots for Module Federation
 export { lidarSlots, viewerSlots } from './slots';

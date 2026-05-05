@@ -95,5 +95,8 @@
   "selectParcelToUpload": "Selecciona una parcela del mapa para subir o descargar datos LiDAR.",
   "loadingMetadata": "Cargando detalles de la entidad...",
   "errorNoGeometry": "Se requiere la geometría de la entidad para la descarga del PNOA.",
-  "cancelProcessing": "Cancelar procesamiento"
+  "processingOptionsHint": "Se aplica al iniciar una nueva descarga o subida",
+"heightOffset": "Ajuste de altura",
+"cancelProcessing": "Cancelar procesamiento",
+"uploadedFiles": "Archivos Subidos"
 }

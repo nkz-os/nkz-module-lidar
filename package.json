@@ -13,8 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nekazari/design-tokens": "^0.1.0-alpha",
     "@nekazari/sdk": "^1.0.0",
     "@nekazari/ui-kit": "^1.0.0",
+    "@nekazari/viewer-kit": "^0.1.0-alpha",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",

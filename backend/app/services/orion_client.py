@@ -138,7 +138,7 @@ class OrionLDClient:
             f"/ngsi-ld/v1/entities?type=DataProcessingJob&q=jobType==\"lidar\"&limit={limit}&offset={offset}",
         )) or []
 
-    async def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int) -> str:
+    async def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None) -> str:
         entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
         entity = {
             "@context": self.CONTEXT,
@@ -153,10 +153,18 @@ class OrionLDClient:
             "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
             "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
         }
+        if dtm_url:
+            entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
+        if dsm_url:
+            entity["dsmUrl"] = {"type": "Property", "value": dsm_url}
+        if chm_url:
+            entity["chmUrl"] = {"type": "Property", "value": chm_url}
+        if classified_laz_url:
+            entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
         await self._request("POST", "/ngsi-ld/v1/entities", entity)
         return entity_id
 
-    def create_digital_asset_sync(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int) -> str:
+    def create_digital_asset_sync(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None) -> str:
         """Synchronous version for worker/pipeline use."""
         entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
         entity = {
@@ -172,6 +180,14 @@ class OrionLDClient:
             "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
             "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
         }
+        if dtm_url:
+            entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
+        if dsm_url:
+            entity["dsmUrl"] = {"type": "Property", "value": dsm_url}
+        if chm_url:
+            entity["chmUrl"] = {"type": "Property", "value": chm_url}
+        if classified_laz_url:
+            entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
         self._request_sync("POST", "/ngsi-ld/v1/entities", entity)
         return entity_id
 

@@ -5,6 +5,7 @@ class LidarStore {
   public activeTilesetUrl: string | null = null;
   public colorMode: 'height' | 'ndvi' | 'rgb' | 'classification' = 'height';
   public showTrees: boolean = false;
+  public heightOffset: number = -50;  // meters, negative = push down to compensate orthometric→ellipsoidal datum
   public layers: any[] = [];
   
   private listeners: Set<Listener> = new Set();
@@ -31,6 +32,11 @@ class LidarStore {
 
   setShowTrees(show: boolean) {
     this.showTrees = show;
+    this.notify();
+  }
+
+  setHeightOffset(offset: number) {
+    this.heightOffset = offset;
     this.notify();
   }
 

@@ -12,6 +12,7 @@ NOT within the API process.
 """
 
 import logging
+import math
 import os
 import tempfile
 import shutil
@@ -73,6 +74,9 @@ class LidarPipeline:
         self.colored_laz: Optional[str] = None
         self.output_tiles_dir: Optional[str] = None
         self.reprojected_laz: Optional[str] = None
+        self.dtm_path: Optional[str] = None
+        self.dsm_path: Optional[str] = None
+        self.chm_path: Optional[str] = None
         self.detected_trees: List[Dict[str, Any]] = []
         self.source_crs: Optional[str] = None
         self.bounds_validator = GeoBoundsValidator(
@@ -128,10 +132,10 @@ class LidarPipeline:
             self.update_job_status("processing", 10, "Downloading and cropping point cloud...")
             self.phase_a_ingest(laz_url, geometry_wkt, config.get("source_crs"))
             
-            # Phase B: Spectral Fusion (if NDVI source provided)
+            # Phase B: Spectral Fusion (if NDVI source provided and color mode is ndvi)
             ndvi_url = config.get("ndvi_source_url")
             colorize_by = config.get("colorize_by", "height")
-            
+
             if colorize_by == "ndvi" and ndvi_url:
                 self.update_job_status("processing", 30, "Applying NDVI colorization...")
                 self.phase_b_spectral_fusion(ndvi_url)
@@ -139,8 +143,12 @@ class LidarPipeline:
                 # Just copy cropped to colored path
                 self.colored_laz = self.cropped_laz
                 self.update_job_status("processing", 30, "Skipping spectral fusion (no NDVI source)")
-            
-            # Phase C: Tree Segmentation (if enabled)
+
+            # Derived products: DTM, DSM, CHM (always generated for cross-module consumption)
+            self.update_job_status("processing", 40, "Generating DTM/DSM/CHM...")
+            self._generate_dtm_dsm_chm()
+
+            # Phase C: Tree Segmentation (if enabled, reuses CHM already generated above)
             detect_trees = config.get("detect_trees", False)
             if detect_trees:
                 self.update_job_status("processing", 50, "Detecting individual trees...")
@@ -154,20 +162,20 @@ class LidarPipeline:
             
             # Upload results to MinIO
             self.update_job_status("processing", 90, "Uploading results...")
-            tileset_url = self._upload_results()
-            
+            upload_urls = self._upload_results()
+
             # Create Orion-LD entities
             self.update_job_status("processing", 95, "Creating digital twin entities...")
-            
+
             # Update job with results
             result = {
-                "tileset_url": tileset_url,
+                "tileset_url": upload_urls["tileset"],
                 "tree_count": len(self.detected_trees),
                 "trees": self.detected_trees,
-                "point_count": self._count_points()
+                "point_count": self._count_points(),
             }
-            
-            self._create_orion_entities(tileset_url, config, result)
+
+            self._create_orion_entities(upload_urls, config, result)
             self.update_job_status("completed", 100, "Processing complete!")
             
             return result
@@ -255,7 +263,7 @@ class LidarPipeline:
                 raise ValueError("The provided LAZ file contains 0 valid points even without cropping.")
 
         logger.info(f"Phase A complete. {count} points. Output: {self.cropped_laz}")
-    
+
     def phase_b_spectral_fusion(self, ndvi_raster_url: str):
         """
         Phase B: Colorize points with NDVI values from a GeoTIFF.
@@ -307,6 +315,53 @@ class LidarPipeline:
         
         logger.info(f"Phase B complete. Output: {self.colored_laz}")
     
+    def _generate_dtm_dsm_chm(self, resolution: float = 0.5):
+        """Generate DTM, DSM, and CHM from the cropped+colored point cloud.
+
+        These derived products are always produced (regardless of tree-detection
+        config) so other modules can consume them via the export API without
+        needing to reprocess the source LAZ.
+
+        Stores paths in self.dtm_path, self.dsm_path, self.chm_path.
+        """
+        logger.info("Generating DTM/DSM/CHM")
+        source_laz = self.colored_laz or self.cropped_laz
+        self.dtm_path = os.path.join(self.work_dir, "dtm.tif")
+        self.dsm_path = os.path.join(self.work_dir, "dsm.tif")
+        self.chm_path = os.path.join(self.work_dir, "chm.tif")
+
+        # DTM: ground-classified points interpolated to raster
+        pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "filters.range", "limits": "Classification[2:2]"},
+                {"type": "writers.gdal", "filename": self.dtm_path,
+                 "resolution": resolution, "output_type": "idw"},
+            ]
+        })).execute()
+
+        # DSM: highest-return surface
+        pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "writers.gdal", "filename": self.dsm_path,
+                 "resolution": resolution, "output_type": "max"},
+            ]
+        })).execute()
+
+        # CHM = DSM - DTM
+        with rasterio.open(self.dtm_path) as dtm_src, rasterio.open(self.dsm_path) as dsm_src:
+            dtm = dtm_src.read(1)
+            dsm = dsm_src.read(1)
+            chm = dsm - dtm
+            chm[chm < 0] = 0
+            chm[np.isnan(chm)] = 0
+            profile = dtm_src.profile.copy()
+            with rasterio.open(self.chm_path, 'w', **profile) as dst:
+                dst.write(chm, 1)
+
+        logger.info("DTM/DSM/CHM generation complete")
+
     def phase_c_tree_segmentation(
         self,
         min_height: float = 2.0,
@@ -315,80 +370,32 @@ class LidarPipeline:
     ):
         """
         Phase C: Detect individual trees using CHM and watershed segmentation.
-        
+
+        Requires that _generate_dtm_dsm_chm() has already been called (the
+        CHM raster is reused from self.chm_path).
+
         Steps:
-        1. Generate CHM (Canopy Height Model) from point cloud
+        1. Load pre-computed CHM
         2. Find local maxima (tree tops)
         3. Apply watershed segmentation
-        4. Extract tree statistics
-        
+        4. Extract tree statistics with canopy polygons
+
         Args:
             min_height: Minimum tree height to detect (meters)
             search_radius: Search radius for local maxima (meters)
             chm_resolution: Resolution of CHM raster (meters)
-        
-        Returns:
-            List of detected trees with their properties
         """
         logger.info("Phase C: Tree segmentation")
-        
-        # Generate CHM using PDAL
-        dtm_path = os.path.join(self.work_dir, "dtm.tif")
-        dsm_path = os.path.join(self.work_dir, "dsm.tif")
-        chm_path = os.path.join(self.work_dir, "chm.tif")
-        
-        source_laz = self.colored_laz or self.cropped_laz
-        
-        # Step 1: Generate DTM (ground points only)
-        dtm_pipeline = {
-            "pipeline": [
-                {"type": "readers.las", "filename": source_laz},
-                {"type": "filters.smrf"},  # Ground classification
-                {"type": "filters.range", "limits": "Classification[2:2]"},  # Ground only
-                {
-                    "type": "writers.gdal",
-                    "filename": dtm_path,
-                    "resolution": chm_resolution,
-                    "output_type": "idw"
-                }
-            ]
-        }
-        pdal.Pipeline(json.dumps(dtm_pipeline)).execute()
-        
-        # Step 2: Generate DSM (highest points)
-        dsm_pipeline = {
-            "pipeline": [
-                {"type": "readers.las", "filename": source_laz},
-                {
-                    "type": "writers.gdal",
-                    "filename": dsm_path,
-                    "resolution": chm_resolution,
-                    "output_type": "max"
-                }
-            ]
-        }
-        pdal.Pipeline(json.dumps(dsm_pipeline)).execute()
-        
-        # Step 3: Calculate CHM = DSM - DTM
-        with rasterio.open(dtm_path) as dtm_src, rasterio.open(dsm_path) as dsm_src:
-            dtm = dtm_src.read(1)
-            dsm = dsm_src.read(1)
-            transform = dtm_src.transform
-            crs = dtm_src.crs
-            
-            # Calculate CHM
-            chm = dsm - dtm
-            chm[chm < 0] = 0  # Remove negative values
-            chm[np.isnan(chm)] = 0
-            
-            # Save CHM
-            profile = dtm_src.profile.copy()
-            with rasterio.open(chm_path, 'w', **profile) as dst:
-                dst.write(chm, 1)
-        
-        # Step 4: Find tree tops (local maxima)
-        logger.info("Finding tree tops...")
-        
+
+        if not self.chm_path or not os.path.exists(self.chm_path):
+            raise RuntimeError("CHM not found — _generate_dtm_dsm_chm() must run before tree segmentation")
+
+        # Load the pre-computed CHM
+        with rasterio.open(self.chm_path) as chm_src:
+            chm = chm_src.read(1)
+            transform = chm_src.transform
+            crs = chm_src.crs
+
         # Apply minimum height threshold
         chm_masked = np.where(chm >= min_height, chm, 0)
         
@@ -538,43 +545,278 @@ class LidarPipeline:
         except (laspy.LaspyError, OSError) as e:
             raise ValueError(f"Cannot read source LAZ file for tiling: {e}")
 
-        # Use py3dtiles command line (more reliable than Python API for large files)
-        # Resolve full path - subprocess may not inherit conda PATH
+        # Adaptive decimation guardrail: prevent OOM on dense clouds
+        source_laz = self._prepare_tiling_input(source_laz)
+
+        # py3dtiles 7.0.0: invoke via CLI subprocess.
+        # The Python convert() API hangs in this environment (master process
+        # spins at 100% CPU while ZMQ workers stay idle, no tiles emitted).
+        # The CLI executable spawns a fresh process and works reliably.
+        # stdout is dropped because py3dtiles emits a stream of progress lines
+        # (one carriage-return-overwritten line per percent on every tile);
+        # capturing them in a Python buffer pushes worker memory past 2 GiB
+        # on bigger inputs and OOM-kills the RQ worker process.
         py3dtiles_bin = shutil.which("py3dtiles") or "/opt/conda/bin/py3dtiles"
+        # py3dtiles defaults --jobs to os.cpu_count() (12 on this host) and
+        # --cache_size to host_total_memory/10, neither of which respect the
+        # pod cgroup limit. Combined with the resident RQ worker process
+        # they OOM-kill a 2 GiB pod mid-conversion. Cap both explicitly.
         cmd = [
             py3dtiles_bin, "convert",
             source_laz,
             "--out", self.output_tiles_dir,
-            "--overwrite"
+            "--overwrite",
+            "--classification",
+            "--jobs", str(settings.PY3DTILES_JOBS),
+            "--cache_size", str(settings.PY3DTILES_CACHE_SIZE_MB),
         ]
-
-        logger.info(f"Running: {' '.join(cmd)}")
         env = os.environ.copy()
         env["PATH"] = "/opt/conda/bin:" + env.get("PATH", "")
         env["PROJ_DATA"] = env.get("PROJ_DATA", "/opt/conda/share/proj")
         env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
-        
+        logger.info(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=settings.PY3DTILES_TIMEOUT,
+            env=env,
+        )
         if result.returncode != 0:
             logger.error(f"py3dtiles failed: {result.stderr}")
             raise RuntimeError(f"py3dtiles conversion failed: {result.stderr}")
-        
+
         # Verify tileset.json was created
         tileset_path = os.path.join(self.output_tiles_dir, "tileset.json")
         if not os.path.exists(tileset_path):
             raise RuntimeError("tileset.json not found after conversion")
-        
+
+        # Fix py3dtiles bounding volumes (known bug: Z extent can be 0,
+        # causing Cesium frustum culling to discard tiles).
+        self._fix_tileset_bounding_volumes(tileset_path)
+
         logger.info(f"Phase D complete. Tiles at: {self.output_tiles_dir}")
     
-    def _upload_results(self) -> str:
-        """Upload tiles to MinIO and return the public URL."""
+    def _fix_tileset_bounding_volumes(self, tileset_path: str) -> None:
+        """
+        Post-process tileset.json to fix py3dtiles bounding volume bug.
+
+        py3dtiles 7.0.0 sometimes computes bounding volumes with Z half-axis=0,
+        which causes Cesium to cull tiles via frustum culling. This reads actual
+        point data from .pnts files and corrects the bounding boxes.
+        """
+        with open(tileset_path, "r") as f:
+            tileset = json.load(f)
+
+        root = tileset.get("root", {})
+        root_transform = root.get("transform")
+        self._fix_tile_bv(root, root_transform, os.path.dirname(tileset_path))
+
+        for child in root.get("children", []):
+            self._fix_tile_bv(child, root_transform, os.path.dirname(tileset_path))
+
+        with open(tileset_path, "w") as f:
+            json.dump(tileset, f, indent=2)
+
+        logger.info("Fixed tileset bounding volumes for Cesium compatibility")
+
+    def _fix_tile_bv(self, tile: dict, parent_transform: Optional[list], tiles_dir: str) -> None:
+        """Fix a single tile's bounding volume by reading actual point data."""
+        bv = tile.get("boundingVolume", {})
+        if "box" not in bv:
+            return
+
+        box = bv["box"]
+        content = tile.get("content", {})
+        uri = content.get("uri", "")
+
+        if uri and uri.endswith(".pnts"):
+            pnts_path = os.path.join(tiles_dir, uri)
+            if os.path.exists(pnts_path):
+                xyz_range = self._read_pnts_xyz_range(pnts_path)
+                if xyz_range:
+                    cx, cy, cz = box[0], box[1], box[2]
+                    # X half-axis (element 3,4,5)
+                    box[3] = max(box[3], (xyz_range["x_max"] - xyz_range["x_min"]) / 2, 0.01)
+                    box[4] = max(box[4], 0.001)
+                    box[5] = max(box[5], 0.001)
+                    # Y half-axis (element 6,7,8)
+                    box[6] = max(box[6], 0.001)
+                    box[7] = max(box[7], (xyz_range["y_max"] - xyz_range["y_min"]) / 2, 0.01)
+                    box[8] = max(box[8], 0.001)
+                    # Z half-axis (element 9,10,11) — this is the critical fix
+                    box[9] = max(box[9], 0.001)
+                    box[10] = max(box[10], (xyz_range["z_max"] - xyz_range["z_min"]) / 2, 0.01)
+                    box[11] = max(box[11], 0.001)
+                    # Ensure center matches data range
+                    box[0] = (xyz_range["x_max"] + xyz_range["x_min"]) / 2
+                    box[1] = (xyz_range["y_max"] + xyz_range["y_min"]) / 2
+                    box[2] = (xyz_range["z_max"] + xyz_range["z_min"]) / 2
+
+    def _read_pnts_xyz_range(self, pnts_path: str) -> Optional[dict]:
+        """Read XYZ coordinate ranges from a .pnts file.
+
+        Handles both quantized (uint16[3], 6 bytes/point) and unquantized
+        (float32[3], 12 bytes/point) position formats, detected from the
+        Feature Table JSON. py3dtiles 7.x emits quantized .pnts by default;
+        reading them as float32 yields garbage that propagates into the
+        post-fix bounding volumes and breaks Cesium frustum culling.
+        """
+        try:
+            with open(pnts_path, "rb") as f:
+                data = f.read()
+
+            feature_json_len = struct.unpack("<I", data[12:16])[0]
+            fj_start = 28
+            fj = json.loads(data[fj_start : fj_start + feature_json_len])
+            pts_count = fj.get("POINTS_LENGTH", 0)
+            if pts_count == 0:
+                return None
+
+            body_start = fj_start + feature_json_len
+
+            pos_quantized = fj.get("POSITION_QUANTIZED")
+            pos_float = fj.get("POSITION")
+
+            if pos_quantized is not None:
+                stride = 6
+                q_offset = fj.get("QUANTIZED_VOLUME_OFFSET", [0.0, 0.0, 0.0])
+                q_scale = fj.get("QUANTIZED_VOLUME_SCALE", [1.0, 1.0, 1.0])
+                accessor = pos_quantized if isinstance(pos_quantized, dict) else {}
+                pos_start = body_start + accessor.get("byteOffset", 0)
+
+                def read_point(off):
+                    x_q, y_q, z_q = struct.unpack("<HHH", data[off : off + 6])
+                    return (
+                        x_q * q_scale[0] + q_offset[0],
+                        y_q * q_scale[1] + q_offset[1],
+                        z_q * q_scale[2] + q_offset[2],
+                    )
+            elif pos_float is not None:
+                stride = 12
+                accessor = pos_float if isinstance(pos_float, dict) else {}
+                pos_start = body_start + accessor.get("byteOffset", 0)
+
+                def read_point(off):
+                    return struct.unpack("<fff", data[off : off + 12])
+            else:
+                logger.debug("No POSITION or POSITION_QUANTIZED in Feature Table")
+                return None
+
+            sample_count = min(100, pts_count)
+            xs, ys, zs = [], [], []
+
+            for i in range(sample_count):
+                x, y, z = read_point(pos_start + i * stride)
+                xs.append(x); ys.append(y); zs.append(z)
+
+            if pts_count > sample_count * 2:
+                for i in range(max(0, pts_count - sample_count), pts_count):
+                    off = pos_start + i * stride
+                    if off + stride > len(data):
+                        break
+                    x, y, z = read_point(off)
+                    xs.append(x); ys.append(y); zs.append(z)
+
+            return {
+                "x_min": min(xs), "x_max": max(xs),
+                "y_min": min(ys), "y_max": max(ys),
+                "z_min": min(zs), "z_max": max(zs),
+            }
+        except Exception as exc:
+            logger.debug("Could not read pnts range from %s: %s", pnts_path, exc)
+            return None
+
+    def _upload_results(self) -> Dict[str, str]:
+        """Upload tiles and derived products to MinIO.
+
+        Returns a dict mapping product keys to public URLs so the caller
+        can attach them to the Orion-LD DigitalAsset entity.
+        """
         prefix = str(self.job_id)
+
+        # 3D Tiles (directory)
         tileset_url = storage_service.upload_directory(
             self.output_tiles_dir,
             prefix
         )
-        return tileset_url
+
+        urls = {"tileset": tileset_url}
+
+        # Derived rasters and classified LAZ (individual files)
+        derived_files = {
+            "dtm": (self.dtm_path, "image/tiff"),
+            "dsm": (self.dsm_path, "image/tiff"),
+            "chm": (self.chm_path, "image/tiff"),
+            "classified_laz": (self.colored_laz or self.cropped_laz, "application/octet-stream"),
+        }
+
+        for product_key, (local_path, content_type) in derived_files.items():
+            if local_path and os.path.exists(local_path):
+                ext = os.path.splitext(local_path)[1] or (".tif" if product_key != "classified_laz" else ".laz")
+                s3_key = f"{prefix}/{product_key}{ext}"
+                storage_service.client.upload_file(
+                    local_path,
+                    storage_service.bucket,
+                    s3_key,
+                    ExtraArgs={"ContentType": content_type},
+                )
+                urls[product_key] = storage_service.get_public_url(s3_key)
+                logger.info(f"Uploaded {product_key}: {urls[product_key]}")
+
+        return urls
     
+    def _prepare_tiling_input(self, source_laz: str) -> str:
+        """
+        Apply adaptive decimation before heavy tiling when clouds are too large.
+
+        This is a deterministic guardrail against work-horse SIGKILL/OOM during
+        py3dtiles conversion. It only activates above a configurable threshold.
+        """
+        max_points = settings.MAX_POINTS_BEFORE_TILING_DECIMATION
+        target_points = max(settings.TILING_TARGET_POINTS, 1)
+        if max_points <= 0:
+            return source_laz
+
+        try:
+            with laspy.open(source_laz) as f:
+                point_count = int(f.header.point_count or 0)
+        except Exception as exc:
+            logger.warning("Could not read point count before tiling: %s", exc)
+            return source_laz
+
+        if point_count <= max_points:
+            return source_laz
+
+        step = max(2, math.ceil(point_count / target_points))
+        decimated_laz = os.path.join(self.work_dir, "tiling_input_decimated.laz")
+        logger.warning(
+            "Adaptive decimation enabled for tiling: %s -> target~%s points (step=%s)",
+            point_count,
+            target_points,
+            step,
+        )
+
+        pipeline = pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+                {"type": "filters.decimation", "step": step},
+                {"type": "writers.las", "filename": decimated_laz, "compression": "laszip"},
+            ]
+        }))
+        reduced_count = pipeline.execute()
+        if reduced_count <= 0:
+            raise RuntimeError(
+                "Adaptive decimation produced 0 points; refusing to continue tiling."
+            )
+        logger.info(
+            "Adaptive decimation complete: %s -> %s points",
+            point_count,
+            reduced_count,
+        )
+        return decimated_laz
+
     def _count_points(self) -> int:
         """Count points in the processed file."""
         source = self.reprojected_laz or self.colored_laz or self.cropped_laz
@@ -599,12 +841,14 @@ class LidarPipeline:
         if not self.bounds_validator.validate_lon_lat(lon, lat):
             raise GeodesyValidationError("CRS_BBOX_OUTLIER")
     
-    def _create_orion_entities(self, tileset_url: str, config: Dict[str, Any], result: Dict[str, Any]):
+    def _create_orion_entities(self, upload_urls: Dict[str, str], config: Dict[str, Any], result: Dict[str, Any]):
         """
         Create Orion-LD entities for the processed data.
-        
+
         Creates:
-        - DigitalAsset entity for the tileset
+        - DigitalAsset entity linking the tileset and all derived products
+          (DTM, DSM, CHM, classified LAZ) so other modules can discover and
+          consume them via standard NGSI-LD queries.
         - AgriTree entities for detected trees (if any)
         """
         client = get_orion_client(self.tenant_id)
@@ -612,15 +856,19 @@ class LidarPipeline:
         client.create_digital_asset_sync(
             asset_id=asset_id,
             parcel_id=self.parcel_id,
-            tileset_url=tileset_url,
+            tileset_url=upload_urls["tileset"],
             source=config.get("source", "PNOA"),
             point_count=result.get("point_count", 0),
             tree_count=result.get("tree_count", 0),
+            dtm_url=upload_urls.get("dtm"),
+            dsm_url=upload_urls.get("dsm"),
+            chm_url=upload_urls.get("chm"),
+            classified_laz_url=upload_urls.get("classified_laz"),
         )
         self.update_job_status(
-            "completed", 
-            100, 
-            f"Processed tileset: {tileset_url}"
+            "completed",
+            100,
+            f"Processed tileset: {upload_urls['tileset']}"
         )
     
     def _cleanup(self):

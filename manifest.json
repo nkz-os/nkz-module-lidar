@@ -1,6 +1,11 @@
 {
   "id": "lidar",
   "name": "lidar",
+  "accent": {
+    "base": "#8B5CF6",
+    "soft": "#EDE9FE",
+    "strong": "#6D28D9"
+  },
   "display_name": "LiDAR Point Cloud Viewer",
   "version": "1.0.0",
   "description": "Visualize LiDAR point cloud data in the unified CesiumJS viewer. Download from national LiDAR providers (PNOA/CNIG) or upload custom drone flights. Includes 3D Tiles conversion, dynamic colorization, and individual tree detection.",
@@ -89,17 +94,59 @@
         {
           "id": "lidar-layer-control",
           "component": "LidarLayerControl",
-          "priority": 15
+          "priority": 15,
+          "tab": "Capas"
         },
         {
           "id": "lidar-config",
           "component": "LidarConfig",
           "priority": 25,
+          "tab": "Acciones",
           "showWhen": {
             "entityType": ["AgriParcel"]
           }
         }
       ]
+    }
+  },
+  "surfaces": {
+    "web": {
+      "slots": {
+        "layer-toggle": [
+          {
+            "id": "lidar-layer-toggle",
+            "component": "LidarLayerToggle",
+            "priority": 10,
+            "showWhen": {
+              "entityType": ["AgriParcel"]
+            }
+          }
+        ],
+        "map-layer": [
+          {
+            "id": "lidar-cesium-layer",
+            "component": "LidarLayer",
+            "priority": 10
+          }
+        ],
+        "context-panel": [
+          {
+            "id": "lidar-layer-control",
+            "component": "LidarLayerControl",
+            "priority": 15,
+            "tab": "Capas"
+          },
+          {
+            "id": "lidar-config",
+            "component": "LidarConfig",
+            "priority": 25,
+            "tab": "Acciones",
+            "showWhen": {
+              "entityType": ["AgriParcel"]
+            }
+          }
+        ]
+      }
     }
   }
 }

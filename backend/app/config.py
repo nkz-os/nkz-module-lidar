@@ -44,9 +44,37 @@ class Settings(BaseSettings):
     GEOBBOX_BUFFER_KM: float = 20.0
     EUROPE_BOUNDS_GEOJSON_PATH: str = "/app/data/eu_uk_bounds.geojson"
     
-    # Worker settings
+    # Processing settings
+    DEFAULT_TREE_MIN_HEIGHT: float = 2.0  # meters
+    DEFAULT_TREE_SEARCH_RADIUS: float = 3.0  # meters
+    GEOBBOX_BUFFER_KM: float = 20.0
+    # Adaptive downsampling guardrail to avoid py3dtiles worker OOM/SIGKILL on very dense clouds.
+    # 0 disables the guard.
+    MAX_POINTS_BEFORE_TILING_DECIMATION: int = 4_000_000
+    # Target point budget after decimation when guardrail is triggered.
+    TILING_TARGET_POINTS: int = 2_500_000
+
+    # Extra LAS dimensions reserved for the eventual py3dtiles upgrade.
+    # py3dtiles 7.0.0 (currently pinned) ignores anything beyond rgb and
+    # classification; this list is consulted by the convert step once
+    # --extra-fields lands in a future release.
+    PY3DTILES_EXTRA_FIELDS: list = ["Classification", "ReturnNumber", "NumberOfReturns", "HeightAboveGround"]
+
+    # Worker settings.
+    # PY3DTILES_TIMEOUT must be strictly less than WORKER_TIMEOUT so a
+    # stuck subprocess raises subprocess.TimeoutExpired (clean failure
+    # path with an Orion job_status update) before RQ kills the entire
+    # work-horse, which loses the failure context.
     WORKER_QUEUE_NAME: str = "lidar-processing"
-    WORKER_TIMEOUT: int = 1800  # 30 minutes max per job
+    WORKER_TIMEOUT: int = 1800        # 30 min — RQ job_timeout
+    PY3DTILES_TIMEOUT: int = 1500     # 25 min — subprocess.run timeout
+
+    # py3dtiles defaults to os.cpu_count() workers and host_total_mem/10 of
+    # cache, neither cgroup-aware. Cap to values compatible with the pod
+    # memory limit (2 GiB → 4 jobs × ~150 MiB + 256 MiB cache + 400 MiB
+    # parent worker keeps headroom for laspy/pdal buffers).
+    PY3DTILES_JOBS: int = 4
+    PY3DTILES_CACHE_SIZE_MB: int = 256
 
     # Security
     CORS_ORIGINS: str = "http://localhost:3000"

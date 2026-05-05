@@ -86,11 +86,37 @@ This avoids silent drift from `:latest` and improves traceability/auditability.
 
 ### Frontend Deployment (Production)
 
-Upload the IIFE bundle to MinIO so it becomes available at:
+Upload the IIFE bundle to MinIO so it becomes available at `/modules/lidar/nkz-module.js`.
 
-- `/modules/lidar/nkz-module.js`
+**CRITICAL: The correct MinIO bucket is `nekazari-frontend`, NOT `frontend-static`.**  
+The nginx `frontend-static` pod proxies `/modules/` → `minio-service:9000/nekazari-frontend/modules/`.  
+Uploading to the wrong bucket will silently serve the old bundle.
 
-This must match `marketplace_modules.remote_entry_url` (see `k8s/registration.sql`).
+```bash
+# Build the IIFE bundle
+npm run build
+# Output: dist/nkz-module.js
+
+# Upload to MinIO (from a pod with boto3 access):
+python3 -c "
+import boto3, os
+from botocore.client import Config
+client = boto3.client('s3',
+    endpoint_url='http://minio-service:9000',
+    aws_access_key_id=os.environ['MINIO_ACCESS_KEY'],
+    aws_secret_access_key=os.environ['MINIO_SECRET_KEY'],
+    config=Config(signature_version='s3v4'), region_name='us-east-1')
+client.put_object(
+    Bucket='nekazari-frontend',
+    Key='modules/lidar/nkz-module.js',
+    Body=open('dist/nkz-module.js', 'rb').read(),
+    ContentType='application/javascript')
+print('Uploaded to nekazari-frontend/modules/lidar/nkz-module.js')
+"
+```
+
+The IIFE bundle URL must match `marketplace_modules.remote_entry_url` (see `k8s/registration.sql`).
+Default value: `/modules/lidar/nkz-module.js`.
 
 ### Kubernetes Deployment (backend only)
 

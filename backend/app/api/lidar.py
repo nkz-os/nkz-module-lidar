@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from redis import Redis
 from rq import Queue
@@ -43,7 +43,7 @@ lidar_job_duration = Histogram(
 
 class ProcessingConfig(BaseModel):
     """Configuration for LiDAR processing job."""
-    colorize_by: str = Field(default="height", description="Color mode: height, ndvi, rgb, classification")
+    colorize_by: str = Field(default="height", description="Color mode: height, classification, heightAboveGround, canopyCover, verticalDensity, rgb")
     detect_trees: bool = Field(default=False, description="Enable tree segmentation")
     tree_min_height: float = Field(default=2.0, description="Minimum tree height in meters")
     tree_search_radius: float = Field(default=3.0, description="Tree crown search radius in meters")
@@ -354,8 +354,52 @@ async def delete_layer(
     await get_orion_client(tenant_id).delete_asset(entity_id)
 
     logger.info(f"Deleted layer {layer_id} for tenant {tenant_id}")
-    
+
     return {"status": "deleted", "layer_id": layer_id}
+
+
+@router.get("/uploads")
+async def list_uploads(
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    List uploaded source .LAZ/.LAS files for the tenant.
+    """
+    from app.services.storage import storage_service
+
+    prefix = f"user_uploads/{tenant_id}/"
+    objects = storage_service.list_objects("lidar-source-tiles", prefix)
+    uploads = [
+        {
+            "id": obj["key"].split("/")[-2],
+            "filename": obj["key"].split("/")[-1],
+            "key": obj["key"],
+            "size_bytes": obj.get("size", 0),
+            "last_modified": obj.get("last_modified", ""),
+        }
+        for obj in objects
+        if obj["key"].endswith((".laz", ".las"))
+    ]
+    return {"uploads": uploads, "total": len(uploads)}
+
+
+@router.delete("/uploads/{upload_id}")
+async def delete_upload(
+    upload_id: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id)
+):
+    """
+    Delete an uploaded source file.
+    """
+    from app.services.storage import storage_service
+
+    prefix = f"user_uploads/{tenant_id}/{upload_id}/"
+    deleted = storage_service.delete_prefix(prefix, bucket="lidar-source-tiles")
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return {"status": "deleted", "upload_id": upload_id, "objects_deleted": deleted}
 
 
 @router.get("/jobs")
@@ -403,6 +447,11 @@ async def upload_laz_file(
     geometry_wkt: Optional[str] = Form(None, description="Optional WKT geometry for cropping"),
     config: str = Form(default="{}", description="Processing config as JSON string"),
     source_crs: Optional[str] = Form(None, description="Optional source CRS override (e.g. EPSG:25830+5782)"),
+    classification_mode: Optional[str] = Form(
+        default="detect",
+        description="native=use file classes, auto=always recompute, detect=auto if missing"
+    ),
+    has_rgb: Optional[bool] = Form(default=True, description="Whether the LAZ has RGB color data"),
     current_user: dict = Depends(require_auth),
     tenant_id: str = Depends(get_tenant_id)
 ):
@@ -487,6 +536,8 @@ async def upload_laz_file(
             "uploaded_file_path": s3_key,
             "source": "user_upload",
             "source_crs": source_crs,
+            "classification_mode": classification_mode,
+            "has_rgb": has_rgb,
         }
         job_entity_id = await get_orion_client(tenant_id).create_processing_job(
             job_id=job_id,
@@ -604,6 +655,109 @@ async def serve_tileset_file(file_path: str, request: Request):
             "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
             "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+# ============================================================================
+# Export / Download — cross-module data contract
+# ============================================================================
+
+EXPORT_PRODUCTS = {
+    "dtm":   ("dtm.tif", "image/tiff"),
+    "dsm":   ("dsm.tif", "image/tiff"),
+    "chm":   ("chm.tif", "image/tiff"),
+    "points": ("classified_laz.laz", "application/octet-stream"),
+}
+
+
+@router.get("/export/{layer_id}/{product}")
+async def export_derived_product(
+    layer_id: str,
+    product: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """
+    Download a derived LiDAR product for a completed layer.
+
+    **Products:**
+
+    | `product` | Returns | Use case |
+    |-----------|---------|----------|
+    | `dtm` | GeoTIFF | Ground elevation model — hydrology, slope, path planning |
+    | `dsm` | GeoTIFF | Surface model (canopy + buildings) — roughness, line-of-sight |
+    | `chm` | GeoTIFF | Canopy Height Model = DSM − DTM — biomass, vigor, vegetation analysis |
+    | `points` | LAZ | Classified point cloud (ground/vegetation/building/water) — custom PDAL pipelines, structural analysis |
+
+    The files are stored in MinIO under the same prefix as the 3D Tiles tileset.
+    They are generated automatically during ingestion; no additional processing is
+    required.
+
+    **Cross-module integration:**
+
+    Other modules (Vegetation, Risks, Cadastral, Robotics, BioOrchestrator, …)
+    should first discover available layers via the Orion-LD Context Broker:
+
+    ```
+    GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&refAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
+    ```
+
+    The response includes NGSI-LD attributes (`dtmUrl`, `dsmUrl`, `chmUrl`,
+    `classifiedLazUrl`) pointing to this endpoint. Pick the product you need
+    and fetch it with the tenant's cookie-based auth.
+
+    **Error handling:**
+    - 404 if the layer does not exist, has no derived product, or `processingStatus != completed`.
+    - 403 if the tenant does not own the layer.
+    """
+    if product not in EXPORT_PRODUCTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown product '{product}'. Available: {', '.join(EXPORT_PRODUCTS.keys())}",
+        )
+
+    # Verify the DigitalAsset exists and belongs to this tenant
+    from app.services.orion_client import get_orion_client as _get_oc
+    entity_id = f"urn:ngsi-ld:DigitalAsset:{layer_id}"
+    try:
+        asset = await _get_oc(tenant_id).get_asset(entity_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Layer not found")
+
+    status_val = asset.get("processingStatus", {})
+    if isinstance(status_val, dict):
+        status_val = status_val.get("value")
+    if status_val != "completed":
+        raise HTTPException(
+            status_code=404,
+            detail="Layer processing is not complete — derived products not available yet",
+        )
+
+    # Stream from MinIO
+    from app.services.storage import storage_service
+    s3_key = f"{layer_id}/{EXPORT_PRODUCTS[product][0]}"
+
+    try:
+        response = storage_service.client.get_object(
+            Bucket=storage_service.bucket,
+            Key=s3_key,
+        )
+        content = response["Body"].read()
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Derived product '{product}' not found for this layer. "
+                   "It may have been processed before cross-module persistence was enabled.",
+        )
+
+    filename = f"{layer_id}_{EXPORT_PRODUCTS[product][0]}"
+    return Response(
+        content=content,
+        media_type=EXPORT_PRODUCTS[product][1],
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",
         },
     )
 
