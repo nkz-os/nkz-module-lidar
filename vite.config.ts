@@ -52,7 +52,7 @@ export default defineConfig({
           'react-dom': 'ReactDOM',
           'react-dom/client': 'ReactDOM',
           'react-router-dom': 'ReactRouterDOM',
-          '@nekazari/design-tokens': '__NKZ_DESIGN_TOKENS__',
+          '@nekazari/design-tokens': '__NKZ_THEME__',
           '@nekazari/sdk': '__NKZ_SDK__',
           '@nekazari/ui-kit': '__NKZ_UI__',
           '@nekazari/viewer-kit': '__NKZ_VIEWER__',
