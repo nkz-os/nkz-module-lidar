@@ -237,7 +237,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   // Show loading indicator while tileset loads
   if (activeTilesetUrl && isLoading) {
     return (
-      <div className="absolute bottom-4 left-4 z-50 bg-nkz-surface backdrop-blur-sm rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-nkz-border flex items-center gap-nkz-inline">
+      <div className="absolute bottom-4 left-4 z-50 bg-white dark:bg-slate-900 rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-slate-200 dark:border-slate-700 flex items-center gap-nkz-inline">
         <Spinner size="sm" />
         <span className="text-nkz-sm text-nkz-text-primary">Loading point cloud...</span>
       </div>

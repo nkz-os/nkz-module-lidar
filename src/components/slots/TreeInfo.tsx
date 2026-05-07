@@ -36,18 +36,18 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
     const healthStatus = getHealthStatus(tree.ndviMean);
 
     return (
-        <Card padding="md" className="bg-white/95 backdrop-blur-md border border-slate-200/50 rounded-xl shadow-lg w-72">
+        <Card padding="md" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg w-72">
             <div className="space-y-4">
                 {/* Header */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                         <TreeDeciduous className="w-5 h-5 text-green-600" />
                         {t('tree.title')}
                     </h3>
                     {onClose && (
                         <button
                             onClick={onClose}
-                            className="text-slate-400 hover:text-slate-600 transition-colors"
+                            className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
                         >
                             &times;
                         </button>
@@ -55,7 +55,7 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                 </div>
 
                 {/* Tree ID */}
-                <div className="text-xs text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded">
+                <div className="text-xs text-slate-500 dark:text-slate-300 font-mono bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded">
                     ID: {tree.id}
                 </div>
 
@@ -70,52 +70,52 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-2 gap-3">
                     {/* Height */}
-                    <div className="bg-slate-50 rounded-lg p-3">
-                        <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-300 mb-1">
                             <Ruler className="w-3.5 h-3.5" />
                             <span className="text-xs font-medium">{t('tree.height')}</span>
                         </div>
-                        <div className="text-lg font-bold text-slate-800">
-                            {tree.height.toFixed(1)} <span className="text-sm font-normal text-slate-500">m</span>
+                        <div className="text-lg font-bold text-slate-800 dark:text-slate-100">
+                            {tree.height.toFixed(1)} <span className="text-sm font-normal text-slate-500 dark:text-slate-300">m</span>
                         </div>
                     </div>
 
                     {/* Crown Diameter */}
-                    <div className="bg-slate-50 rounded-lg p-3">
-                        <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-300 mb-1">
                             <Circle className="w-3.5 h-3.5" />
                             <span className="text-xs font-medium">{t('tree.crownDiameter')}</span>
                         </div>
-                        <div className="text-lg font-bold text-slate-800">
-                            {tree.crownDiameter.toFixed(1)} <span className="text-sm font-normal text-slate-500">m</span>
+                        <div className="text-lg font-bold text-slate-800 dark:text-slate-100">
+                            {tree.crownDiameter.toFixed(1)} <span className="text-sm font-normal text-slate-500 dark:text-slate-300">m</span>
                         </div>
                     </div>
 
                     {/* Crown Area */}
-                    <div className="bg-slate-50 rounded-lg p-3">
-                        <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-300 mb-1">
                             <TreeDeciduous className="w-3.5 h-3.5" />
                             <span className="text-xs font-medium">{t('tree.crownArea')}</span>
                         </div>
-                        <div className="text-lg font-bold text-slate-800">
-                            {tree.crownArea.toFixed(1)} <span className="text-sm font-normal text-slate-500">m&sup2;</span>
+                        <div className="text-lg font-bold text-slate-800 dark:text-slate-100">
+                            {tree.crownArea.toFixed(1)} <span className="text-sm font-normal text-slate-500 dark:text-slate-300">m&sup2;</span>
                         </div>
                     </div>
 
                     {/* NDVI */}
-                    <div className="bg-slate-50 rounded-lg p-3">
-                        <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-300 mb-1">
                             <Leaf className="w-3.5 h-3.5" />
                             <span className="text-xs font-medium">{t('tree.ndvi')}</span>
                         </div>
-                        <div className="text-lg font-bold text-slate-800">
+                        <div className="text-lg font-bold text-slate-800 dark:text-slate-100">
                             {tree.ndviMean !== undefined ? tree.ndviMean.toFixed(2) : '\u2014'}
                         </div>
                     </div>
                 </div>
 
                 {/* Location */}
-                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2">
                     <MapPin className="w-3.5 h-3.5" />
                     <span>
                         {tree.location.coordinates[1].toFixed(6)}, {tree.location.coordinates[0].toFixed(6)}
@@ -123,9 +123,9 @@ const TreeInfo: React.FC<TreeInfoProps> = ({ tree, onClose }) => {
                 </div>
 
                 {/* Estimated Biomass (calculated from height and crown) */}
-                <div className="border-t border-slate-100 pt-3">
-                    <div className="text-xs text-slate-500 mb-1">{t('tree.biomass')}</div>
-                    <div className="text-sm font-medium text-slate-700">
+                <div className="border-t border-slate-100 dark:border-slate-700 pt-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-300 mb-1">{t('tree.biomass')}</div>
+                    <div className="text-sm font-medium text-slate-700 dark:text-slate-100">
                         ~{Math.round(tree.height * tree.crownArea * 0.5)} kg
                         <span className="text-xs text-slate-400 ml-1">{t('tree.biomassApprox')}</span>
                     </div>
