@@ -341,7 +341,9 @@ class LidarPipeline:
             ]
         }))
         bounds_pipeline.execute()
-        bounds_meta = json.loads(bounds_pipeline.metadata)
+        bounds_meta = bounds_pipeline.metadata
+        if isinstance(bounds_meta, str):
+            bounds_meta = json.loads(bounds_meta)
         # PDAL metadata: readers.las → minx/miny/maxx/maxy
         las_meta = bounds_meta.get("metadata", {})
         minx = las_meta.get("minx", 0)
