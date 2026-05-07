@@ -330,13 +330,36 @@ class LidarPipeline:
         self.dsm_path = os.path.join(self.work_dir, "dsm.tif")
         self.chm_path = os.path.join(self.work_dir, "chm.tif")
 
+        # Compute full point cloud bounds so DTM and DSM share the same grid.
+        # PDAL writers.gdal derives raster extent from the points that reach it;
+        # DTM filters to ground-only (Classification==2) which may cover less
+        # area than the full cloud, producing a smaller raster.  Passing the
+        # same explicit bounds to both writers guarantees identical dimensions.
+        bounds_pipeline = pdal.Pipeline(json.dumps({
+            "pipeline": [
+                {"type": "readers.las", "filename": source_laz},
+            ]
+        }))
+        bounds_pipeline.execute()
+        bounds_meta = json.loads(bounds_pipeline.metadata)
+        # PDAL metadata: readers.las → minx/miny/maxx/maxy
+        las_meta = bounds_meta.get("metadata", {})
+        minx = las_meta.get("minx", 0)
+        miny = las_meta.get("miny", 0)
+        maxx = las_meta.get("maxx", 0)
+        maxy = las_meta.get("maxy", 0)
+        # PDAL bounds string: "([minx,maxx],[miny,maxy])"
+        bounds_str = f"([{minx},{maxx}],[{miny},{maxy}])"
+        logger.info(f"DTM/DSM bounds from source: {bounds_str}")
+
         # DTM: ground-classified points interpolated to raster
         pdal.Pipeline(json.dumps({
             "pipeline": [
                 {"type": "readers.las", "filename": source_laz},
                 {"type": "filters.range", "limits": "Classification[2:2]"},
                 {"type": "writers.gdal", "filename": self.dtm_path,
-                 "resolution": resolution, "output_type": "idw"},
+                 "resolution": resolution, "output_type": "idw",
+                 "bounds": bounds_str},
             ]
         })).execute()
 
@@ -345,7 +368,8 @@ class LidarPipeline:
             "pipeline": [
                 {"type": "readers.las", "filename": source_laz},
                 {"type": "writers.gdal", "filename": self.dsm_path,
-                 "resolution": resolution, "output_type": "max"},
+                 "resolution": resolution, "output_type": "max",
+                 "bounds": bounds_str},
             ]
         })).execute()
 
@@ -353,6 +377,15 @@ class LidarPipeline:
         with rasterio.open(self.dtm_path) as dtm_src, rasterio.open(self.dsm_path) as dsm_src:
             dtm = dtm_src.read(1)
             dsm = dsm_src.read(1)
+            if dtm.shape != dsm.shape:
+                logger.error(
+                    f"DTM/DSM shape mismatch after bounds alignment: "
+                    f"DTM={dtm.shape} DSM={dsm.shape}. "
+                    f"bounds={bounds_str} res={resolution}"
+                )
+                raise RuntimeError(
+                    f"DTM/DSM shape mismatch: DTM={dtm.shape} DSM={dsm.shape}"
+                )
             chm = dsm - dtm
             chm[chm < 0] = 0
             chm[np.isnan(chm)] = 0
