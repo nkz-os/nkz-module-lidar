@@ -6,10 +6,28 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import httpx
+import re
+import os
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _make_headers(tenant_id: str) -> dict:
+    n = tenant_id.lower().strip().replace('-', '_').replace(' ', '_')
+    n = re.sub(r'[^a-z0-9_]', '', n)
+    n = n.strip('_') or tenant_id
+    headers = {
+        "NGSILD-Tenant": n,
+        "Fiware-Service": n,
+        "Fiware-ServicePath": "/",
+        "Accept": "application/ld+json",
+    }
+    ctx = os.getenv("CONTEXT_URL", "")
+    if ctx:
+        headers["Link"] = f'<{ctx}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
+    return headers
 
 
 class OrionLDClient:
@@ -21,13 +39,16 @@ class OrionLDClient:
     def __init__(self, tenant_id: Optional[str] = None):
         self.base_url = settings.ORION_URL.rstrip("/")
         self.tenant_id = tenant_id
-        self.headers = {
-            "Accept": "application/ld+json",
-        }
         if tenant_id:
-            self.headers["NGSILD-Tenant"] = tenant_id
+            self.headers = _make_headers(tenant_id)
+        else:
+            self.headers = {
+                "Accept": "application/ld+json",
+            }
+        # Override Link with explicit setting if configured
         if settings.ORION_CONTEXT_URL:
-            self.headers["Link"] = f'<{settings.ORION_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
+            link_val = f'<{settings.ORION_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
+            self.headers["Link"] = link_val
 
     async def _request(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None) -> Any:
         """Async HTTP request to Orion-LD (used by API handlers)."""
