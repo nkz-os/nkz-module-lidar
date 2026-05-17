@@ -1,64 +1,25 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { nkzModulePreset } from '@nekazari/module-builder';
 import path from 'path';
 
-// IIFE build for Nekazari runtime module injection
-export default defineConfig({
-  base: '/modules/lidar/',
-  plugins: [
-    react({ jsxRuntime: 'classic' }),
-  ],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-  server: {
-    host: '0.0.0.0',
-    port: 5004,
-    cors: true,
-    proxy: {
-      '/api': {
-        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8000',
-        changeOrigin: true,
-        secure: true,
+export default defineConfig(
+  nkzModulePreset({
+    viteConfig: {
+      resolve: {
+        alias: { '@': path.resolve(__dirname, './src') },
       },
-    },
-  },
-  build: {
-    target: 'es2020',
-    minify: true,
-    cssCodeSplit: false,
-    lib: {
-      entry: path.resolve(__dirname, 'src/moduleEntry.ts'),
-      name: 'NkzModuleLidar',
-      formats: ['iife'],
-      fileName: () => 'nkz-module.js',
-    },
-    rollupOptions: {
-      external: [
-        'react',
-        'react-dom',
-        'react-dom/client',
-        'react-router-dom',
-        '@nekazari/design-tokens',
-        '@nekazari/sdk',
-        '@nekazari/ui-kit',
-        '@nekazari/viewer-kit',
-      ],
-      output: {
-        globals: {
-          'react': 'React',
-          'react-dom': 'ReactDOM',
-          'react-dom/client': 'ReactDOM',
-          'react-router-dom': 'ReactRouterDOM',
-          '@nekazari/design-tokens': '__NKZ_THEME__',
-          '@nekazari/sdk': '__NKZ_SDK__',
-          '@nekazari/ui-kit': '__NKZ_UI__',
-          '@nekazari/viewer-kit': '__NKZ_VIEWER__',
+      server: {
+        host: '0.0.0.0',
+        port: 5004,
+        cors: true,
+        proxy: {
+          '/api': {
+            target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000',
+            changeOrigin: true,
+            secure: true,
+          },
         },
-        inlineDynamicImports: true,
       },
     },
-  },
-});
+  }),
+);
