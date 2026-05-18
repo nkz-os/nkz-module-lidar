@@ -1,4 +1,4 @@
-import { defineModule } from '@nekazari/module-kit';
+import { defineModule, withModuleProvider } from '@nekazari/module-kit';
 import React, { lazy, Suspense } from 'react';
 import './i18n';
 import { lidarSlots } from './slots';
@@ -15,27 +15,6 @@ const MainWrapper: React.FC = () => (
   </LidarProvider>
 );
 
-// LidarProvider was previously a top-level slots.moduleProvider. SlotsSchema only
-// accepts arrays per slot key, and each federated widget mounts into its own React
-// tree. Strip moduleProvider and wrap every localComponent so widgets get their
-// provider on mount.
-const { moduleProvider: _moduleProvider, ...rawSlots } = lidarSlots as Record<string, unknown>;
-const wrappedSlots = Object.fromEntries(
-  Object.entries(rawSlots).map(([slot, entries]) => [
-    slot,
-    (entries as Array<Record<string, any>>).map((entry) => {
-      const Inner = entry.localComponent as React.ComponentType<any> | undefined;
-      if (!Inner) return entry;
-      const Wrapped: React.FC<any> = (props) => (
-        <LidarProvider>
-          <Inner {...props} />
-        </LidarProvider>
-      );
-      return { ...entry, localComponent: Wrapped };
-    }),
-  ]),
-);
-
 export default defineModule({
   id: 'lidar',
   displayName: 'LiDAR Point Cloud',
@@ -46,5 +25,5 @@ export default defineModule({
   icon: 'mountain-snow',
   main: MainWrapper,
   api: { basePath: '/api/lidar' },
-  slots: wrappedSlots as never,
+  slots: withModuleProvider(lidarSlots) as never,
 });
