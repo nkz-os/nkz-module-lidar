@@ -8,7 +8,7 @@
  * - Performance optimization with screen space error
  */
 
-import React, { useEffect, useRef, useCallback, useState } from 'react';
+import React, { useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { useTheme } from '@nekazari/design-tokens';
 import { Spinner } from '@nekazari/ui-kit';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
@@ -19,19 +19,18 @@ import { useLidarContext, ColorMode } from '../../services/lidarContext';
 type CesiumViewerType = any;
 type CesiumTilesetType = any;
 
-/**
- * Get the Cesium viewer from the host's ViewerContext.
- * The host exposes window.__nekazariViewerContextInstance which holds cesiumViewer.
- * This is the canonical way for IIFE modules to access the Cesium viewer.
- */
+// Stable fallback used when the host has not (yet) exposed its ViewerContext.
+// Created once at module load so useContext gets a stable reference.
+const FallbackViewerContext = React.createContext<any>(undefined);
+
+// The host exposes its ViewerContext object on window so federated modules can
+// subscribe to it with their own React. Module Federation 2.0 makes React a
+// shared singleton, so `useContext` from our import sees the same context
+// instance the host provides at runtime.
 function useCesiumViewer(): CesiumViewerType | null {
-  try {
-    const React = (window as any).React;
-    const ctx = React.useContext((window as any).__nekazariViewerContextInstance);
-    return ctx?.cesiumViewer ?? null;
-  } catch {
-    return null;
-  }
+  const HostViewerContext = (window as any).__nekazariViewerContextInstance as React.Context<any> | undefined;
+  const ctx = useContext(HostViewerContext ?? FallbackViewerContext);
+  return ctx?.cesiumViewer ?? null;
 }
 
 interface LidarLayerProps {
