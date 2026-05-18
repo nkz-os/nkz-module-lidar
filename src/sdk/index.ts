@@ -11,6 +11,7 @@
  * - window.__nekazariI18n - i18n context
  */
 
+import { createContext, useContext, type Context } from 'react';
 import type { ViewerHookResult } from '../types';
 
 // Import locale files for standalone fallback
@@ -34,63 +35,37 @@ const locales: Record<string, Record<string, string>> = {
 export type { ViewerHookResult as ViewerContextValue } from '../types';
 export type { NekazariAuthContext as AuthContextValue } from '../types';
 
+// Stable fallback context, created once at module load. Used when the host
+// has not exposed __nekazariViewerContextInstance yet (eg. standalone dev).
+const FallbackViewerContext = createContext<ViewerHookResult | undefined>(undefined);
+
+const EMPTY_VIEWER: ViewerHookResult = {
+  selectedEntityId: null,
+  selectedEntityType: null,
+  currentDate: new Date(),
+  isTimelinePlaying: false,
+  activeLayers: new Set(),
+  isLayerActive: () => false,
+  setLayerActive: () => {},
+  toggleLayer: () => {},
+  selectEntity: () => {},
+  setCurrentDate: () => {},
+};
+
 /**
  * Access the viewer context from the host application.
+ *
+ * The host exposes its ViewerContext object on window. Module Federation 2.0
+ * makes React a shared singleton, so calling useContext from this module hits
+ * the same provider chain the host sets up.
  */
 export function useViewer(): ViewerHookResult {
-  const React = (window as any).React;
-  const ViewerContext = (window as any).__nekazariViewerContextInstance;
-
-  if (!React || !ViewerContext) {
-    if (import.meta.env.DEV) {
-      console.warn('[SDK] ViewerContext instance not available on window');
-    }
-    return {
-      selectedEntityId: null,
-      selectedEntityType: null,
-      currentDate: new Date(),
-      isTimelinePlaying: false,
-      activeLayers: new Set(),
-      isLayerActive: () => false,
-      setLayerActive: () => {},
-      toggleLayer: () => {},
-      selectEntity: () => {},
-      setCurrentDate: () => {},
-    };
-  }
-
-  try {
-    const context = React.useContext(ViewerContext);
-    if (context === undefined) {
-      return {
-        selectedEntityId: null,
-        selectedEntityType: null,
-        currentDate: new Date(),
-        isTimelinePlaying: false,
-        activeLayers: new Set(),
-        isLayerActive: () => false,
-        setLayerActive: () => {},
-        toggleLayer: () => {},
-        selectEntity: () => {},
-        setCurrentDate: () => {},
-      };
-    }
-    return context;
-  } catch (err) {
-    console.error('[SDK] Error consuming ViewerContext:', err);
-    return {
-      selectedEntityId: null,
-      selectedEntityType: null,
-      currentDate: new Date(),
-      isTimelinePlaying: false,
-      activeLayers: new Set(),
-      isLayerActive: () => false,
-      setLayerActive: () => {},
-      toggleLayer: () => {},
-      selectEntity: () => {},
-      setCurrentDate: () => {},
-    };
-  }
+  const HostViewerContext =
+    (window as any).__nekazariViewerContextInstance as
+      | Context<ViewerHookResult | undefined>
+      | undefined;
+  const ctx = useContext(HostViewerContext ?? FallbackViewerContext);
+  return ctx ?? EMPTY_VIEWER;
 }
 
 /**
