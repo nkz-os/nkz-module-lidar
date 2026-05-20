@@ -65,9 +65,15 @@ spec:
             - name: MINIO_BUCKET
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
-              value: "https://nkz.robotika.cloud/api/lidar/tilesets"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: TILESET_PUBLIC_URL
             - name: MINIO_PUBLIC_BASE_URL
-              value: "https://minio.robotika.cloud"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: MINIO_PUBLIC_BASE_URL
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
@@ -76,16 +82,28 @@ spec:
             - name: COVERAGE_INDEX_GEOJSON_PATH
               value: "/app/data/lidar_coverage.geojson"
             - name: CORS_ORIGINS
-              value: "https://nekazari.robotika.cloud"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: CORS_ORIGINS
             # Authentication (Keycloak)
             - name: KEYCLOAK_URL
-              value: "https://auth.robotika.cloud/auth"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: KEYCLOAK_URL
             - name: KEYCLOAK_REALM
               value: "nekazari"
             - name: JWT_ISSUER
-              value: "https://auth.robotika.cloud/auth/realms/nekazari"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: JWT_ISSUER
             - name: JWKS_URL
-              value: "https://auth.robotika.cloud/auth/realms/nekazari/protocol/openid-connect/certs"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: JWKS_URL
             - name: JWT_ALGORITHM
               value: "RS256"
             # PROJ data path for GDAL/PDAL CRS operations
@@ -185,9 +203,15 @@ spec:
             - name: MINIO_BUCKET
               value: "lidar-tilesets"
             - name: TILESET_PUBLIC_URL
-              value: "https://nkz.robotika.cloud/api/lidar/tilesets"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: TILESET_PUBLIC_URL
             - name: MINIO_PUBLIC_BASE_URL
-              value: "https://minio.robotika.cloud"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: MINIO_PUBLIC_BASE_URL
             # Orion-LD
             - name: ORION_URL
               value: "http://orion-ld-service:1026"
@@ -197,7 +221,10 @@ spec:
               value: "/app/data/lidar_coverage.geojson"
             # Same allowlist as API; worker applies MinIO bucket CORS via StorageService.
             - name: CORS_ORIGINS
-              value: "https://nekazari.robotika.cloud,https://nkz.robotika.cloud"
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: CORS_ORIGINS
             # Worker settings
             - name: WORKER_QUEUE_NAME
               value: "lidar-processing"
