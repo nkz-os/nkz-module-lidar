@@ -12,7 +12,7 @@ import React, { createContext, useContext, useState, ReactNode, useCallback, use
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
 import type { GeoJSONGeometry } from '../types';
-import { lidarStore } from './lidarStore';
+import { lidarStore, LayerScope } from './lidarStore';
 import { useSyncExternalStore } from 'react';
 
 // ============================================================================
@@ -58,6 +58,7 @@ function geoJsonToWkt(geojson: GeoJSONGeometry): string | null {
 // ============================================================================
 
 export type ColorMode = 'height' | 'ndvi' | 'rgb' | 'classification';
+export type { LayerScope };
 
 interface LidarContextType {
   // Entity Selection
@@ -80,6 +81,10 @@ interface LidarContextType {
   setShowTrees: (show: boolean) => void;
   heightOffset: number;
   setHeightOffset: (offset: number) => void;
+  layerVisible: boolean;
+  setLayerVisible: (visible: boolean) => void;
+  layerScope: LayerScope;
+  setLayerScope: (scope: LayerScope) => void;
 
   // Processing
   isProcessing: boolean;
@@ -189,6 +194,24 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setLayers = useCallback((newLayers: Layer[]) => {
     lidarStore.setLayers(newLayers);
+  }, []);
+
+  const layerVisible = useSyncExternalStore(
+    (cb) => lidarStore.subscribe(cb),
+    () => lidarStore.layerVisible
+  );
+
+  const layerScope = useSyncExternalStore(
+    (cb) => lidarStore.subscribe(cb),
+    () => lidarStore.layerScope
+  );
+
+  const setLayerVisible = useCallback((visible: boolean) => {
+    lidarStore.setLayerVisible(visible);
+  }, []);
+
+  const setLayerScope = useCallback((scope: LayerScope) => {
+    lidarStore.setLayerScope(scope);
   }, []);
 
   // Processing state
@@ -475,6 +498,10 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setShowTrees,
         heightOffset,
         setHeightOffset,
+        layerVisible,
+        setLayerVisible,
+        layerScope,
+        setLayerScope,
         isProcessing,
         processingJob,
         processingConfig,
