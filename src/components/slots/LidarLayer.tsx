@@ -2,10 +2,12 @@
  * LIDAR Layer - Cesium 3D Tiles Integration
  *
  * Features:
- * - Loads 3D Tiles point clouds from tileset URL
+ * - Loads 3D Tiles point clouds from tileset URL(s)
+ * - Scope 'selected': mounts the currently active tileset only
+ * - Scope 'all': mounts one Cesium3DTileset per available layer
  * - Eye Dome Lighting (EDL) for depth perception
  * - Dynamic styling (height, NDVI, classification)
- * - Performance optimization with screen space error
+ * - Performance optimization with screen space error (16 when >5 tilesets)
  */
 
 import React, { useContext, useEffect, useRef, useCallback, useState } from 'react';
@@ -83,11 +85,20 @@ const COLOR_RAMPS: Record<string, StyleColor> = {
 };
 
 export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) => {
-  const { activeTilesetUrl, colorMode, heightOffset } = useLidarContext();
-  const tilesetRef = useRef<CesiumTilesetType | null>(null);
+  const {
+    activeTilesetUrl,
+    colorMode,
+    heightOffset,
+    layerVisible,
+    layerScope,
+    layers,
+    selectedLayerId,
+  } = useLidarContext();
+  const tilesetRefs = useRef<CesiumTilesetType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const theme = useTheme();
+  // useTheme kept for parity with original — may be used by future styling extensions
+  const _theme = useTheme();
 
   // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
   const contextViewer = useCesiumViewer();
@@ -113,128 +124,147 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   }, []);
 
   /**
-   * Load 3D Tiles tileset
+   * Load 3D Tiles tilesets — one per target depending on scope.
    */
   useEffect(() => {
-    console.log('[LidarLayer] viewer:', !!viewer, 'url:', activeTilesetUrl);
-    if (!viewer) { console.warn('[LidarLayer] No viewer prop'); return; }
-
-    // @ts-ignore - Cesium is loaded globally by the host
-    const Cesium = window.Cesium;
+    if (!viewer) return;
+    const Cesium = (window as any).Cesium;
     if (!Cesium) {
-      console.warn('[LidarLayer] Cesium not available');
       setLoadError('CesiumJS not available');
       return;
     }
 
-    // Cleanup previous tileset
-    if (tilesetRef.current) {
-      viewer.scene.primitives.remove(tilesetRef.current);
-      tilesetRef.current = null;
-    }
+    // Cleanup all prior tilesets
+    tilesetRefs.current.forEach(ts => {
+      try { viewer.scene.primitives.remove(ts); } catch { /* destroyed */ }
+    });
+    tilesetRefs.current = [];
 
-    if (!activeTilesetUrl) {
-      console.log('[LidarLayer] No active tileset URL');
+    if (!layerVisible) {
       setIsLoading(false);
       setLoadError(null);
       return;
     }
 
-    console.log('[LidarLayer] Loading:', activeTilesetUrl.substring(0, 80) + '...');
+    const targets: { id: string; url: string }[] = [];
+    if (layerScope === 'all') {
+      layers.forEach((l: any) => {
+        if (l && l.tileset_url) targets.push({ id: l.id, url: l.tileset_url });
+      });
+    } else if (activeTilesetUrl) {
+      targets.push({ id: selectedLayerId ?? 'active', url: activeTilesetUrl });
+    }
+
+    if (targets.length === 0) {
+      setIsLoading(false);
+      setLoadError(null);
+      return;
+    }
+
+    const sse = targets.length > 5 ? 16 : 8;
+
     setIsLoading(true);
+    setLoadError(null);
 
-    const loadTileset = async () => {
-      try {
-        let tileset: CesiumTilesetType;
-        const options = {
-          maximumScreenSpaceError: 8,
-          maximumMemoryUsage: 1024,
-          dynamicScreenSpaceError: true,
-          dynamicScreenSpaceErrorDensity: 0.00278,
-          dynamicScreenSpaceErrorFactor: 4.0,
-        };
+    let cancelled = false;
+    (async () => {
+      for (const t of targets) {
+        if (cancelled) return;
+        try {
+          const options = {
+            maximumScreenSpaceError: sse,
+            maximumMemoryUsage: 1024,
+            dynamicScreenSpaceError: true,
+            dynamicScreenSpaceErrorDensity: 0.00278,
+            dynamicScreenSpaceErrorFactor: 4.0,
+          };
 
-        if (Cesium.Cesium3DTileset.fromUrl) {
-          tileset = await Cesium.Cesium3DTileset.fromUrl(activeTilesetUrl, options);
-        } else {
-          tileset = new Cesium.Cesium3DTileset({ url: activeTilesetUrl, ...options });
-        }
-
-        // Apply height offset to compensate for orthometric→ellipsoidal datum difference
-        if (heightOffset !== 0 && tileset.boundingSphere) {
-          try {
-            const center = tileset.boundingSphere.center;
-            const cartographic = Cesium.Cartographic.fromCartesian(center);
-            const offsetCenter = Cesium.Cartesian3.fromRadians(
-              cartographic.longitude,
-              cartographic.latitude,
-              cartographic.height + heightOffset
-            );
-            const translation = Cesium.Cartesian3.subtract(offsetCenter, center, new Cesium.Cartesian3());
-            tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation);
-          } catch (e) {
-            console.warn('[LidarLayer] Could not apply height offset:', e);
+          let tileset: CesiumTilesetType;
+          if (Cesium.Cesium3DTileset.fromUrl) {
+            tileset = await Cesium.Cesium3DTileset.fromUrl(t.url, options);
+          } else {
+            tileset = new Cesium.Cesium3DTileset({ url: t.url, ...options });
           }
-        }
 
-        // Add to scene
-        viewer.scene.primitives.add(tileset);
-        tilesetRef.current = tileset;
+          if (cancelled || viewer.isDestroyed()) {
+            try { tileset.destroy?.(); } catch { /* ok */ }
+            return;
+          }
 
-        // Apply initial style
-        const style = createStyle(colorMode);
-        if (style) {
-          tileset.style = style;
-        }
+          // Apply height offset to compensate for orthometric→ellipsoidal datum difference
+          if (heightOffset !== 0 && tileset.boundingSphere) {
+            try {
+              const center = tileset.boundingSphere.center;
+              const cartographic = Cesium.Cartographic.fromCartesian(center);
+              const offsetCenter = Cesium.Cartesian3.fromRadians(
+                cartographic.longitude,
+                cartographic.latitude,
+                cartographic.height + heightOffset
+              );
+              const translation = Cesium.Cartesian3.subtract(offsetCenter, center, new Cesium.Cartesian3());
+              tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation);
+            } catch (e) {
+              console.warn('[LidarLayer] Could not apply height offset:', e);
+            }
+          }
 
-        // Wait for tileset to load then fly to it
-        if (tileset.readyPromise) {
-          await tileset.readyPromise;
+          const style = createStyle(colorMode);
+          if (style) tileset.style = style;
+          viewer.scene.primitives.add(tileset);
+          tilesetRefs.current.push(tileset);
+        } catch (err) {
+          console.error('[LidarLayer] tileset load failed', t.url, err);
         }
+      }
 
-        if (!viewer.isDestroyed()) {
-          viewer.flyTo(tileset, {
-            duration: 1.5,
-            offset: new Cesium.HeadingPitchRange(
-              0,
-              Cesium.Math.toRadians(-45),
-              1000
-            ),
-          });
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error('[LidarLayer] Error loading 3D Tiles:', error);
-        setLoadError('Failed to load point cloud');
+      if (cancelled) return;
+
+      if (tilesetRefs.current.length > 0) {
         setIsLoading(false);
+        if (!viewer.isDestroyed()) {
+          try {
+            // Fly to the first loaded tileset (readyPromise compat)
+            const first = tilesetRefs.current[0];
+            if (first.readyPromise) await first.readyPromise;
+            await viewer.flyTo(first, {
+              duration: 1.5,
+              offset: new Cesium.HeadingPitchRange(
+                0,
+                Cesium.Math.toRadians(-45),
+                1000
+              ),
+            });
+          } catch { /* ok */ }
+        }
+      } else {
+        setIsLoading(false);
+        setLoadError('Failed to load point cloud');
       }
-    };
+    })();
 
-    loadTileset();
-
-    // Cleanup on unmount
     return () => {
-      if (tilesetRef.current && viewer && !viewer.isDestroyed()) {
-        viewer.scene.primitives.remove(tilesetRef.current);
-        tilesetRef.current = null;
-      }
+      cancelled = true;
+      tilesetRefs.current.forEach(ts => {
+        try {
+          if (viewer && !viewer.isDestroyed()) viewer.scene.primitives.remove(ts);
+        } catch { /* ok */ }
+      });
+      tilesetRefs.current = [];
     };
-  }, [viewer, activeTilesetUrl, createStyle, colorMode]);
+  }, [viewer, layerScope, layerVisible, activeTilesetUrl, layers, selectedLayerId, heightOffset, createStyle, colorMode]);
 
   /**
-   * Update style when color mode changes
+   * Update style when color mode changes without reloading tilesets.
    */
   useEffect(() => {
-    if (tilesetRef.current) {
-      const style = createStyle(colorMode);
-      if (style) {
-        tilesetRef.current.style = style;
-      }
-    }
+    if (tilesetRefs.current.length === 0) return;
+    const style = createStyle(colorMode);
+    if (!style) return;
+    tilesetRefs.current.forEach(ts => { ts.style = style; });
   }, [colorMode, createStyle]);
 
-  // Show loading indicator while tileset loads
-  if (activeTilesetUrl && isLoading) {
+  // Show loading indicator while tileset(s) load
+  if (layerVisible && isLoading) {
     return (
       <div className="absolute bottom-4 left-4 z-50 bg-white dark:bg-slate-900 rounded-nkz-md px-nkz-stack py-nkz-inline shadow-nkz-lg border border-slate-200 dark:border-slate-700 flex items-center gap-nkz-inline">
         <Spinner size="sm" />

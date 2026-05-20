@@ -1,5 +1,7 @@
 type Listener = () => void;
 
+export type LayerScope = 'selected' | 'all';
+
 class LidarStore {
   public selectedLayerId: string | null = null;
   public activeTilesetUrl: string | null = null;
@@ -7,6 +9,8 @@ class LidarStore {
   public showTrees: boolean = false;
   public heightOffset: number = -50;  // meters, negative = push down to compensate orthometric→ellipsoidal datum
   public layers: any[] = [];
+  public layerVisible: boolean = false;
+  public layerScope: LayerScope = 'selected';
   
   private listeners: Set<Listener> = new Set();
 
@@ -42,6 +46,16 @@ class LidarStore {
 
   setLayers(layers: any[]) {
     this.layers = layers;
+    this.notify();
+  }
+
+  setLayerVisible(visible: boolean) {
+    this.layerVisible = visible;
+    this.notify();
+  }
+
+  setLayerScope(scope: LayerScope) {
+    this.layerScope = scope;
     this.notify();
   }
 }

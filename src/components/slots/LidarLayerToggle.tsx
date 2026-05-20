@@ -1,15 +1,17 @@
 /**
- * LiDAR Layer Toggle - Lightweight toggle for the layer dropdown.
+ * LiDAR Layer Toggle - Unified layer row for the Capas dropdown.
  *
- * Shows a simple on/off indicator and color mode selector.
- * The full control panel lives in the context-panel (right sidebar).
+ * Built on LayerMenuRow from @nekazari/module-kit.
+ * Scope 'selected' mounts only the active tileset; 'all' mounts every layer.
+ * Opacity slider intentionally omitted — Cesium3DTileset does not support
+ * per-layer alpha the same way ImageryLayer does.
  */
 
 import React from 'react';
-import { SlotShellCompact } from '@nekazari/viewer-kit';
-import { Toggle } from '@nekazari/ui-kit';
-import { useTranslation } from '../../sdk';
+import { LayerMenuRow } from '@nekazari/module-kit';
+import { Mountain } from 'lucide-react';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
+import { useTranslation } from '../../sdk';
 
 const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
 
@@ -17,76 +19,83 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'height', icon: '\u{1F4CF}' },
   { value: 'ndvi', icon: '\u{1F33F}' },
   { value: 'rgb', icon: '\u{1F3A8}' },
-  { value: 'classification', icon: '\u{1F3F7}️' },
+  { value: 'classification', icon: '\u{1F3F7}' },
 ];
 
 const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
   const {
-    selectedEntityId: _selectedEntityId,
+    layers,
     activeTilesetUrl,
     setActiveTilesetUrl,
-    layers,
     selectedLayerId,
     setSelectedLayerId,
+    layerScope,
+    setLayerScope,
+    layerVisible,
+    setLayerVisible,
     colorMode,
     setColorMode,
     isProcessing,
-    hasCoverage: _hasCoverage,
   } = useLidarContext();
 
-  const handleToggle = () => {
-    if (activeTilesetUrl) {
-      // Turn off layer
-      setActiveTilesetUrl(null);
-      setSelectedLayerId(null);
-    } else if (layers && layers.length > 0) {
-      // Turn on the first available layer or the previously selected one
-      const layerToActivate = selectedLayerId
-        ? layers.find(l => l.id === selectedLayerId) || layers[0]
-        : layers[0];
+  const hasAnyLayer = Array.isArray(layers) && layers.length > 0;
 
-      setActiveTilesetUrl(layerToActivate.tileset_url);
-      setSelectedLayerId(layerToActivate.id);
+  const handleToggle = (next: boolean) => {
+    setLayerVisible(next);
+    // When turning on under 'selected' scope, prime an active tileset
+    // so the layer effect has something to mount.
+    if (next && layerScope === 'selected' && !activeTilesetUrl && hasAnyLayer) {
+      const pick = selectedLayerId
+        ? layers.find((l: any) => l.id === selectedLayerId) || layers[0]
+        : layers[0];
+      if (pick?.tileset_url) {
+        setActiveTilesetUrl(pick.tileset_url);
+        setSelectedLayerId(pick.id);
+      }
     }
   };
 
-  const isActive = !!activeTilesetUrl;
+  const disabledReason =
+    isProcessing ? t('processing', 'Procesando…')
+    : !hasAnyLayer ? t('noLayers', 'Sin tilesets')
+    : undefined;
 
   return (
-    <SlotShellCompact moduleId="lidar" accent={lidarAccent}>
-      <div className="flex flex-col gap-nkz-tight">
-        <Toggle
-          checked={isActive}
-          onChange={handleToggle}
-          label="LiDAR"
-          disabled={!layers || layers.length === 0 || isProcessing}
-        />
-
-        {/* Color mode pills (only when layer is active) */}
-        {isActive && (
-          <div className="flex justify-end gap-nkz-tight">
-            {COLOR_MODES.map((m) => (
-              <button
-                key={m.value}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setColorMode(m.value);
-                }}
-                className={`px-nkz-inline py-nkz-tight rounded-nkz-md text-nkz-xs transition-colors ${
-                  colorMode === m.value
-                    ? 'bg-nkz-accent-soft text-nkz-accent-strong'
-                    : 'bg-nkz-surface-sunken hover:bg-nkz-surface text-nkz-text-muted'
-                }`}
-                title={t(`color.${m.value}`)}
-              >
-                {m.icon}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </SlotShellCompact>
+    <LayerMenuRow
+      moduleId="lidar"
+      accent={lidarAccent}
+      icon={<Mountain className="w-4 h-4" />}
+      title="LiDAR"
+      enabled={layerVisible}
+      onToggle={handleToggle}
+      scope={layerScope}
+      onScopeChange={setLayerScope}
+      disabledReason={disabledReason}
+      scopeLabel={t('layerToggle.scope', 'Ámbito')}
+      selectedLabel={t('layerToggle.selected', 'Seleccionada')}
+      allLabel={t('layerToggle.all', 'Todas')}
+      mode={
+        <div className="flex flex-wrap gap-nkz-tight">
+          {COLOR_MODES.map(m => (
+            <button
+              key={m.value}
+              type="button"
+              aria-pressed={colorMode === m.value}
+              onClick={() => setColorMode(m.value)}
+              className={`px-nkz-inline py-nkz-tight text-nkz-xs rounded-nkz-md transition-colors ${
+                colorMode === m.value
+                  ? 'bg-nkz-accent-soft text-nkz-accent-strong'
+                  : 'bg-nkz-surface-sunken text-nkz-text-muted hover:bg-nkz-surface'
+              }`}
+              title={t(`color.${m.value}`)}
+            >
+              {m.icon}
+            </button>
+          ))}
+        </div>
+      }
+    />
   );
 };
 
