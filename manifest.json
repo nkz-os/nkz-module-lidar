@@ -9,6 +9,14 @@
   "display_name": "LiDAR Point Cloud Viewer",
   "version": "1.0.0",
   "description": "Visualize LiDAR point cloud data in the unified CesiumJS viewer. Download from national LiDAR providers (PNOA/CNIG) or upload custom drone flights. Includes 3D Tiles conversion, dynamic colorization, and individual tree detection.",
+  "description_i18n": {
+    "es": "Visualiza datos de nubes de puntos LiDAR en el visor unificado CesiumJS. Descarga desde proveedores nacionales LiDAR (PNOA/CNIG) o sube vuelos de dron personalizados. Incluye conversión 3D Tiles, colorización dinámica y detección individual de árboles.",
+    "en": "Visualize LiDAR point cloud data in the unified CesiumJS viewer. Download from national LiDAR providers (PNOA/CNIG) or upload custom drone flights. Includes 3D Tiles conversion, dynamic colorization, and individual tree detection.",
+    "eu": "Bistaratu LiDAR puntu-hodei datuak CesiumJS bisore bateratuan. Deskargatu LiDAR hornitzaile nazionaletatik (PNOA/CNIG) edo igo drone-hegaldi pertsonalizatuak. 3D Tiles bihurketa, koloreztatze dinamikoa eta zuhaitzen banakako detekzioa barne.",
+    "fr": "Visualisez les données de nuages de points LiDAR dans le visualiseur unifié CesiumJS. Téléchargez depuis les fournisseurs nationaux LiDAR (PNOA/CNIG) ou importez des vols de drone personnalisés. Inclut la conversion 3D Tiles, la colorisation dynamique et la détection individuelle des arbres.",
+    "pt": "Visualize dados de nuvens de pontos LiDAR no visualizador unificado CesiumJS. Baixe de provedores nacionais LiDAR (PNOA/CNIG) ou carregue voos de drone personalizados. Inclui conversão 3D Tiles, colorização dinâmica e detecção individual de árvores.",
+    "ca": "Visualitza dades de núvols de punts LiDAR al visor unificat CesiumJS. Descarrega des de proveïdors nacionals LiDAR (PNOA/CNIG) o puja vols de dron personalitzats. Inclou conversió 3D Tiles, colorització dinàmica i detecció individual d'arbres."
+  },
   "short_description": "LiDAR point cloud visualization and tree analysis",
   "author": {
     "name": "Nekazari Team",
