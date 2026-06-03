@@ -1,79 +1,23 @@
 """
-Authentication middleware for FastAPI.
+Authentication middleware for LIDAR module.
+
+Trusts api-gateway injected headers. Does NOT validate JWKS/JWT directly.
+The api-gateway has already validated the token against Keycloak and injects
+X-Tenant-ID, X-User-ID, X-User-Roles headers.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
-from jwt import PyJWKClient
-import os
 
 logger = logging.getLogger(__name__)
-
-# JWT configuration
-JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'RS256')
-JWT_ISSUER = os.getenv('JWT_ISSUER', '')
-JWKS_URL = os.getenv('JWKS_URL', f'{JWT_ISSUER}/protocol/openid-connect/certs')
-
-# Cache for JWKS
-_jwks_client: Optional[PyJWKClient] = None
 
 security = HTTPBearer()
 
 
-def get_jwks_client() -> PyJWKClient:
-    """Get or create JWKS client."""
-    if not JWT_ISSUER:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT_ISSUER is not configured"
-        )
-    global _jwks_client
-    if _jwks_client is None:
-        _jwks_client = PyJWKClient(JWKS_URL)
-    return _jwks_client
-
-
-async def verify_token(token: str) -> dict:
-    """Verify JWT token and return payload."""
-    try:
-        jwks_client = get_jwks_client()
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=[JWT_ALGORITHM],
-            issuer=JWT_ISSUER,
-            options={"verify_exp": True, "verify_iss": True}
-        )
-        
-        return payload
-        
-    except jwt.ExpiredSignatureError:
-        logger.warning("Token has expired")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired"
-        )
-    except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid token: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"Error verifying token: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token verification failed: {str(e)}"
-        )
-
-
 def get_tenant_id(request: Request) -> str:
-    """Extract tenant ID from request headers."""
+    """Extract tenant ID from request headers (injected by api-gateway)."""
     tenant_id = request.headers.get('X-Tenant-ID')
     if not tenant_id:
         raise HTTPException(
@@ -83,27 +27,41 @@ def get_tenant_id(request: Request) -> str:
     return tenant_id
 
 
+def get_user_id(request: Request) -> Optional[str]:
+    """Extract user ID from request headers (injected by api-gateway)."""
+    return request.headers.get('X-User-ID')
+
+
+def get_user_roles(request: Request) -> List[str]:
+    """Extract user roles from request headers (injected by api-gateway)."""
+    roles_header = request.headers.get('X-User-Roles', '')
+    return [r.strip() for r in roles_header.split(',') if r.strip()]
+
+
 async def require_auth(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> dict:
-    """Dependency to require authentication.
-    Reads token from Authorization header or httpOnly cookie (fallback).
     """
-    token = None
-    if credentials:
-        token = credentials.credentials
-    else:
-        token = request.cookies.get('nkz_token')
+    Require authentication via api-gateway headers.
 
-    if not token:
+    The api-gateway validates the JWT and injects headers. This dependency
+    reads those headers. If no token is present in the Authorization header
+    (Bearer), the api-gateway may still inject tenant headers for
+    cookie-authenticated requests.
+
+    Returns dict with tenant_id, user_id, roles for downstream use.
+    """
+    tenant_id = request.headers.get('X-Tenant-ID')
+    if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization token",
+            detail="Authentication required — no tenant context",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = await verify_token(token)
-    return payload
-
-
+    return {
+        "tenant_id": tenant_id,
+        "user_id": request.headers.get('X-User-ID'),
+        "roles": [r.strip() for r in request.headers.get('X-User-Roles', '').split(',') if r.strip()],
+    }
