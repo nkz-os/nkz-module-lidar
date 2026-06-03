@@ -482,7 +482,7 @@ async def upload_laz_file(
         config_dict = {}
 
     # Save file to temp location, streaming in chunks to avoid loading into memory
-    max_size = 500 * 1024 * 1024
+    max_size = settings.MAX_UPLOAD_SIZE
     temp_dir = tempfile.mkdtemp(prefix="lidar_upload_")
     temp_file_path = os.path.join(temp_dir, f"upload.{file_ext}")
 
@@ -616,18 +616,32 @@ TILESET_CONTENT_TYPES = {
 
 
 @router.get("/tilesets/{file_path:path}")
-async def serve_tileset_file(file_path: str, request: Request):
+@limiter.limit("300 per minute")
+async def serve_tileset_file(
+    file_path: str,
+    request: Request,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
-    Proxy endpoint that streams tileset files from MinIO.
+    Serve tileset files from MinIO with tenant isolation.
 
-    Cesium requests tileset.json and .pnts files via this route.
-    No auth required — tilesets are public read.
+    Validates that the job (first path segment) belongs to the requesting tenant
+    by checking Orion-LD before serving any tile data.
     """
     from app.services.storage import storage_service
 
     # Files are stored in MinIO under "{job_id}/tileset.json", "{job_id}/r.pnts", etc.
-    # The route strips "/api/lidar/tilesets/" leaving "{job_id}/..."
     object_key = file_path
+    job_id = file_path.split("/")[0] if "/" in file_path else file_path
+
+    # Verify tenant owns this job via Orion-LD
+    try:
+        job_entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
+        await get_orion_client(tenant_id).get_job(job_entity_id)
+    except Exception:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     if settings.MINIO_PUBLIC_BASE_URL:
         direct_url = f"{settings.MINIO_PUBLIC_BASE_URL.rstrip('/')}/{settings.MINIO_BUCKET}/{object_key}"
         return RedirectResponse(url=direct_url, status_code=307)
