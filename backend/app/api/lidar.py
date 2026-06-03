@@ -483,121 +483,95 @@ async def upload_laz_file(
 
     # Save file to temp location, streaming in chunks to avoid loading into memory
     max_size = settings.MAX_UPLOAD_SIZE
-    temp_dir = tempfile.mkdtemp(prefix="lidar_upload_")
-    temp_file_path = os.path.join(temp_dir, f"upload.{file_ext}")
 
-    try:
-        bytes_written = 0
-        chunk_size = 1024 * 1024  # 1MB chunks
-        with open(temp_file_path, 'wb') as f:
-            while True:
-                chunk = await file.read(chunk_size)
-                if not chunk:
-                    break
-                bytes_written += len(chunk)
-                if bytes_written > max_size:
-                    f.close()
-                    os.remove(temp_file_path)
-                    os.rmdir(temp_dir)
-                    raise HTTPException(
-                        status_code=413,
-                        detail="File too large. Maximum size is 500MB."
-                    )
-                f.write(chunk)
-        
-        logger.info(f"Uploaded file saved to {temp_file_path} ({bytes_written} bytes)")
-        inspect_laz_crs(temp_file_path, source_crs_override=source_crs)
-        
-        job_id = str(uuid4())
-        
-        # Upload the file to MinIO temp location so the worker can download it
-        from app.services.storage import storage_service
-        s3_key = f"user_uploads/{tenant_id}/{job_id}/upload.{file_ext}"
-        storage_service.ensure_bucket("lidar-source-tiles")
-        storage_service.upload_file(
-            bucket="lidar-source-tiles",
-            key=s3_key,
-            file_path=temp_file_path,
-            content_type="application/octet-stream"
-        )
-        logger.info(f"Uploaded file stored in MinIO at lidar-source-tiles/{s3_key}")
-        
-        # Cleanup local API temp file immediately after upload to MinIO
+    with tempfile.TemporaryDirectory(prefix="lidar_upload_") as temp_dir:
+        temp_file_path = os.path.join(temp_dir, f"upload.{file_ext}")
+
         try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            if os.path.exists(temp_dir):
-                os.rmdir(temp_dir)
-        except Exception as cleanup_err:
-            logger.warning(f"Failed to cleanup local temp file: {cleanup_err}")
-
-        config_payload = {
-            **config_dict,
-            "uploaded_file_path": s3_key,
-            "source": "user_upload",
-            "source_crs": source_crs,
-            "classification_mode": classification_mode,
-            "has_rgb": has_rgb,
-        }
-        job_entity_id = await get_orion_client(tenant_id).create_processing_job(
-            job_id=job_id,
-            parcel_id=parcel_id,
-            geometry_wkt=geometry_wkt,
-            config=config_payload,
-            user_id=current_user.get("sub", "unknown"),
-        )
-        
-        # Enqueue job for worker
-        try:
-            queue = get_redis_queue()
-            rq_job = queue.enqueue(
-                process_uploaded_file,
-                job_entity_id,
-                tenant_id,
-                s3_key,
-                geometry_wkt,
-                job_timeout=settings.WORKER_TIMEOUT
-            )
-            # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
-            await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
-            logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
+            bytes_written = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
+            with open(temp_file_path, 'wb') as f:
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    bytes_written += len(chunk)
+                    if bytes_written > max_size:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="File too large. Maximum size is 500MB."
+                        )
+                    f.write(chunk)
             
-        except Exception as e:
-            logger.error(f"Failed to enqueue upload job: {e}")
-            await get_orion_client(tenant_id).update_job(
-                job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
-            )
-
-            # Cleanup temp file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            if os.path.exists(temp_dir):
-                os.rmdir(temp_dir)
+            logger.info(f"Uploaded file saved to {temp_file_path} ({bytes_written} bytes)")
+            inspect_laz_crs(temp_file_path, source_crs_override=source_crs)
             
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Processing queue unavailable. Please try again later."
+            job_id = str(uuid4())
+            
+            # Upload the file to MinIO temp location so the worker can download it
+            from app.services.storage import storage_service
+            s3_key = f"user_uploads/{tenant_id}/{job_id}/upload.{file_ext}"
+            storage_service.ensure_bucket("lidar-source-tiles")
+            storage_service.upload_file(
+                bucket="lidar-source-tiles",
+                key=s3_key,
+                file_path=temp_file_path,
+                content_type="application/octet-stream"
             )
-        
-        return ProcessResponse(
-            job_id=job_id,
-            status="queued",
-            message="File uploaded and queued for processing. Poll /status/{job_id} for updates."
-        )
-        
-    except GeodesyValidationError as e:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        # Cleanup on error
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
-        raise
+            logger.info(f"Uploaded file stored in MinIO at lidar-source-tiles/{s3_key}")
+            
+            # Local temp file already uploaded to MinIO — ctx mgr handles cleanup
+
+            config_payload = {
+                **config_dict,
+                "uploaded_file_path": s3_key,
+                "source": "user_upload",
+                "source_crs": source_crs,
+                "classification_mode": classification_mode,
+                "has_rgb": has_rgb,
+            }
+            job_entity_id = await get_orion_client(tenant_id).create_processing_job(
+                job_id=job_id,
+                parcel_id=parcel_id,
+                geometry_wkt=geometry_wkt,
+                config=config_payload,
+                user_id=current_user.get("sub", "unknown"),
+            )
+            
+            # Enqueue job for worker
+            try:
+                queue = get_redis_queue()
+                rq_job = queue.enqueue(
+                    process_uploaded_file,
+                    job_entity_id,
+                    tenant_id,
+                    s3_key,
+                    geometry_wkt,
+                    job_timeout=settings.WORKER_TIMEOUT
+                )
+                # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
+                await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+                logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
+                
+            except Exception as e:
+                logger.error(f"Failed to enqueue upload job: {e}")
+                await get_orion_client(tenant_id).update_job(
+                    job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
+                )
+                
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Processing queue unavailable. Please try again later."
+                )
+            
+            return ProcessResponse(
+                job_id=job_id,
+                status="queued",
+                message="File uploaded and queued for processing. Poll /status/{job_id} for updates."
+            )
+            
+        except GeodesyValidationError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
 
 # ============================================================================
