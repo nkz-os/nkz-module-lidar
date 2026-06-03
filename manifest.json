@@ -79,43 +79,7 @@
       "Individual tree detection and analysis",
       "Crown diameter and biomass estimation"
     ],
-    "screenshots": [],
-    "slots": {
-      "layer-toggle": [
-        {
-          "id": "lidar-layer-toggle",
-          "component": "LidarLayerToggle",
-          "priority": 10,
-          "showWhen": {
-            "entityType": ["AgriParcel"]
-          }
-        }
-      ],
-      "map-layer": [
-        {
-          "id": "lidar-cesium-layer",
-          "component": "LidarLayer",
-          "priority": 10
-        }
-      ],
-      "context-panel": [
-        {
-          "id": "lidar-layer-control",
-          "component": "LidarLayerControl",
-          "priority": 15,
-          "tab": "Capas"
-        },
-        {
-          "id": "lidar-config",
-          "component": "LidarConfig",
-          "priority": 25,
-          "tab": "Acciones",
-          "showWhen": {
-            "entityType": ["AgriParcel"]
-          }
-        }
-      ]
-    }
+    "screenshots": []
   },
   "surfaces": {
     "web": {

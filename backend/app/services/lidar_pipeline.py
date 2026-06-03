@@ -610,17 +610,25 @@ class LidarPipeline:
         env["PROJ_DATA"] = env.get("PROJ_DATA", "/opt/conda/share/proj")
         env["PROJ_LIB"] = env.get("PROJ_LIB", "/opt/conda/share/proj")
         logger.info(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=settings.PY3DTILES_TIMEOUT,
-            env=env,
-        )
+        temp_log_path = os.path.join(self.work_dir, "py3dtiles_output.log")
+        with open(temp_log_path, 'w') as temp_log:
+            result = subprocess.run(
+                cmd,
+                stdout=temp_log,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=settings.PY3DTILES_TIMEOUT,
+                env=env,
+            )
         if result.returncode != 0:
-            logger.error(f"py3dtiles failed: {result.stderr}")
-            raise RuntimeError(f"py3dtiles conversion failed: {result.stderr}")
+            # Read captured output for diagnostics
+            try:
+                with open(temp_log_path, 'r') as f:
+                    tail = ''.join(f.readlines()[-50:])
+            except Exception:
+                tail = "(could not read log)"
+            logger.error(f"py3dtiles failed (returncode={result.returncode}): {result.stderr}\nLast 50 lines of stdout:\n{tail}")
+            raise RuntimeError(f"py3dtiles conversion failed (returncode={result.returncode}): {result.stderr}")
 
         # Verify tileset.json was created
         tileset_path = os.path.join(self.output_tiles_dir, "tileset.json")

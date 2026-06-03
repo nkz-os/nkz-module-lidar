@@ -25,5 +25,13 @@ export default defineModule({
   icon: 'mountain-snow',
   main: MainWrapper,
   api: { basePath: '/api/lidar' },
+  data: {
+    entities: [
+      { type: 'AgriParcel', access: 'read' },
+      { type: 'DigitalAsset', access: 'read' },
+      { type: 'DataProcessingJob', access: 'read' },
+    ],
+    timeseries: [],
+  },
   slots: withModuleProvider(lidarSlots) as never,
 });

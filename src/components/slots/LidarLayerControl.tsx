@@ -107,6 +107,7 @@ const LidarLayerControl: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; filename: string; size_bytes: number }>>([]);
   const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   const COLOR_MODE_OPTIONS: { value: ColorMode; label: string; icon: string; desc: string }[] = [
@@ -128,6 +129,7 @@ const LidarLayerControl: React.FC = () => {
   useEffect(() => {
     return () => {
       if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+      uploadAbortRef.current?.abort();
     };
   }, []);
 
@@ -226,6 +228,10 @@ const LidarLayerControl: React.FC = () => {
       const uploadResponse = await lidarApi.uploadFile(formData);
 
       // Poll until job completes (same flow as PNOA download)
+      // Cancel any previous upload polling
+      uploadAbortRef.current?.abort();
+      uploadAbortRef.current = new AbortController();
+
       const finalStatus = await lidarApi.pollJobStatus(
         uploadResponse.job_id,
         (status) => {
@@ -233,6 +239,7 @@ const LidarLayerControl: React.FC = () => {
         },
         2000,
         300,
+        uploadAbortRef.current.signal,
       );
 
       if (finalStatus.tileset_url) {
