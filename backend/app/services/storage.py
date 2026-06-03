@@ -50,30 +50,8 @@ class StorageService:
             if error_code in ('404', 'NoSuchBucket'):
                 logger.info(f"Creating bucket {self.bucket}")
                 self.client.create_bucket(Bucket=self.bucket)
-                # Set public read policy for tilesets
-                self._set_public_read_policy()
             else:
                 raise
-    
-    def _set_public_read_policy(self):
-        """Set bucket policy to allow public read access."""
-        policy = {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Principal": "*",
-                    "Action": ["s3:GetObject"],
-                    "Resource": [f"arn:aws:s3:::{self.bucket}/*"]
-                }
-            ]
-        }
-        import json
-        self.client.put_bucket_policy(
-            Bucket=self.bucket,
-            Policy=json.dumps(policy)
-        )
-        logger.info(f"Set public read policy on bucket {self.bucket}")
 
     def _sync_bucket_cors(self) -> None:
         """
