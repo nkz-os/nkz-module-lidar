@@ -86,26 +86,6 @@ spec:
                 configMapKeyRef:
                   name: lidar-config
                   key: CORS_ORIGINS
-            # Authentication (Keycloak)
-            - name: KEYCLOAK_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: lidar-config
-                  key: KEYCLOAK_URL
-            - name: KEYCLOAK_REALM
-              value: "nekazari"
-            - name: JWT_ISSUER
-              valueFrom:
-                configMapKeyRef:
-                  name: lidar-config
-                  key: JWT_ISSUER
-            - name: JWKS_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: lidar-config
-                  key: JWKS_URL
-            - name: JWT_ALGORITHM
-              value: "RS256"
             # PROJ data path for GDAL/PDAL CRS operations
             - name: PROJ_DATA
               value: "/opt/conda/share/proj"
@@ -115,6 +95,9 @@ spec:
               value: "ON"
             - name: PROJ_USER_WRITABLE_DIRECTORY
               value: "/var/cache/proj"
+            # Upload limits
+            - name: MAX_UPLOAD_SIZE
+              value: "524288000"
           volumeMounts:
             - name: proj-cache
               mountPath: /var/cache/proj
