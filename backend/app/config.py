@@ -31,10 +31,6 @@ class Settings(BaseSettings):
     ORION_URL: str = "http://orion-ld:1026"
     ORION_CONTEXT_URL: Optional[str] = None
     
-    # Keycloak (for token validation)
-    KEYCLOAK_URL: str = "http://keycloak:8080/auth"
-    KEYCLOAK_REALM: str = "nekazari"
-    
     # PNOA / CNIG data source
     COVERAGE_INDEX_GEOJSON_PATH: str = "/app/data/lidar_coverage.geojson"
     
@@ -67,6 +63,7 @@ class Settings(BaseSettings):
     # work-horse, which loses the failure context.
     WORKER_QUEUE_NAME: str = "lidar-processing"
     WORKER_TIMEOUT: int = 1800        # 30 min — RQ job_timeout
+    MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500 MB
     PY3DTILES_TIMEOUT: int = 1500     # 25 min — subprocess.run timeout
 
     # py3dtiles defaults to os.cpu_count() workers and host_total_mem/10 of
