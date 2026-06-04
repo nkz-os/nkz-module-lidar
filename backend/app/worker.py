@@ -39,8 +39,8 @@ class NoMaintenanceWorker(Worker):
     def run_maintenance_tasks(self) -> None:
         """No-op: skip RQ registry cleaning to avoid CPU hang, but still
         mark the maintenance cycle as completed so the loop doesn't spin."""
-        from datetime import datetime, timezone
-        self.last_cleaned_at = datetime.now(timezone.utc)
+        from rq.utils import utcnow
+        self.last_cleaned_at = utcnow()
 
 # Configure logging
 logging.basicConfig(
