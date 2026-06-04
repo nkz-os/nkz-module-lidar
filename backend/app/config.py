@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # work-horse, which loses the failure context.
     WORKER_QUEUE_NAME: str = "lidar-processing"
     WORKER_TIMEOUT: int = 1800        # 30 min — RQ job_timeout
+    WORKER_MAINTENANCE_INTERVAL: int = 600  # 10 min — RQ registry cleanup interval
     MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500 MB
     PY3DTILES_TIMEOUT: int = 1500     # 25 min — subprocess.run timeout
 

@@ -186,7 +186,10 @@ def run_worker():
         )
 
         logger.info("Worker ready. Waiting for jobs...")
-        worker.work(with_scheduler=True)
+        worker.work(
+            with_scheduler=True,
+            maintenance_task_interval=settings.WORKER_MAINTENANCE_INTERVAL,
+        )
 
 
 if __name__ == "__main__":
