@@ -25,6 +25,21 @@ from rq.registry import FailedJobRegistry
 
 from app.config import settings
 
+
+class NoMaintenanceWorker(Worker):
+    """
+    RQ Worker that skips the built-in maintenance task loop.
+
+    RQ's clean_registries() in the maintenance task causes 100% CPU spin
+    in our environment (both 1.15.1 and 1.16.2). We disable it here and
+    rely on Redis key expiry + the reconcile_failed_jobs() startup step
+    instead.
+    """
+
+    def run_maintenance_tasks(self) -> None:
+        """No-op: skip RQ registry cleaning to avoid CPU hang."""
+        return
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -177,13 +192,12 @@ def run_worker():
     with Connection(redis_conn):
         queues = [Queue(settings.WORKER_QUEUE_NAME)]
 
-        worker = Worker(
+        worker = NoMaintenanceWorker(
             queues,
             name=worker_name,
             default_worker_ttl=settings.WORKER_TIMEOUT,
             exception_handlers=[_rq_exception_handler],
             work_horse_killed_handler=_work_horse_killed_handler,
-            maintenance_interval=86400,  # 24h — minimize RQ registry cleanup runs
         )
 
         logger.info("Worker ready. Waiting for jobs...")
