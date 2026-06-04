@@ -183,13 +183,11 @@ def run_worker():
             default_worker_ttl=settings.WORKER_TIMEOUT,
             exception_handlers=[_rq_exception_handler],
             work_horse_killed_handler=_work_horse_killed_handler,
+            maintenance_task_interval=settings.WORKER_MAINTENANCE_INTERVAL,
         )
 
         logger.info("Worker ready. Waiting for jobs...")
-        worker.work(
-            with_scheduler=True,
-            maintenance_task_interval=settings.WORKER_MAINTENANCE_INTERVAL,
-        )
+        worker.work(with_scheduler=True)
 
 
 if __name__ == "__main__":
