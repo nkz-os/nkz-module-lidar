@@ -28,12 +28,17 @@ from app.config import settings
 
 class NoMaintenanceWorker(Worker):
     """
-    RQ Worker that skips the built-in maintenance task loop.
+    RQ Worker that skips the built-in maintenance task loop and pubsub.
 
     RQ's clean_registries() in the maintenance task causes 100% CPU spin
     in our environment (both 1.15.1 and 1.16.2). We disable it here and
     rely on Redis key expiry + the reconcile_failed_jobs() startup step
     instead.
+
+    The pubsub thread (redis-py 5.0.1) also busy-loops because sleep_time
+    is passed as timeout to get_message() where block=False ignores it.
+    We disable pubsub entirely — work-horse-killed notifications are
+    handled by reconcile_failed_jobs() on next startup.
     """
 
     def run_maintenance_tasks(self) -> None:
@@ -41,6 +46,15 @@ class NoMaintenanceWorker(Worker):
         mark the maintenance cycle as completed so the loop doesn't spin."""
         from rq.utils import utcnow
         self.last_cleaned_at = utcnow()
+
+    def subscribe(self) -> None:
+        """No-op: disable pubsub thread to avoid redis-py 5.0.1 busy-loop."""
+        self.pubsub_thread = None
+        self.pubsub = None
+
+    def unsubscribe(self) -> None:
+        """No-op: pubsub was never started."""
+        pass
 
 # Configure logging
 logging.basicConfig(
