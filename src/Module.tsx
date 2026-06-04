@@ -26,11 +26,7 @@ export default defineModule({
   main: MainWrapper,
   api: { basePath: '/api/lidar' },
   data: {
-    entities: [
-      { type: 'AgriParcel', access: 'read' },
-      { type: 'DigitalAsset', access: 'read' },
-      { type: 'DataProcessingJob', access: 'read' },
-    ],
+    entities: ['AgriParcel', 'DigitalAsset', 'DataProcessingJob'],
     timeseries: [],
   },
   slots: withModuleProvider(lidarSlots) as never,
