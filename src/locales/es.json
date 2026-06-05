@@ -98,5 +98,6 @@
   "processingOptionsHint": "Se aplica al iniciar una nueva descarga o subida",
 "heightOffset": "Ajuste de altura",
 "cancelProcessing": "Cancelar procesamiento",
-"uploadedFiles": "Archivos Subidos"
+"uploadedFiles": "Archivos Subidos",
+"noPolygonBoundary": "Esta parcela no tiene contorno poligonal. El procesamiento LiDAR requiere un polígono de parcela para recortar la nube de puntos."
 }

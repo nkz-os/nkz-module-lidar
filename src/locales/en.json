@@ -98,5 +98,6 @@
   "processingOptionsHint": "Applied when starting a new download or upload",
 "heightOffset": "Height offset",
 "cancelProcessing": "Cancel processing",
-"uploadedFiles": "Uploaded Files"
+"uploadedFiles": "Uploaded Files",
+"noPolygonBoundary": "This parcel has no polygon boundary. LiDAR processing requires a parcel polygon to crop the point cloud."
 }

@@ -534,8 +534,7 @@ const LidarLayerControl: React.FC = () => {
             </Button>
             {!selectedEntityGeometry && selectedEntityId && (
               <p className="text-xs text-nkz-warning mt-1">
-                Esta parcela no tiene contorno poligonal. El procesamiento LiDAR requiere 
-                un polígono de parcela para recortar la nube de puntos.
+                {t('noPolygonBoundary')}
               </p>
             )}
 

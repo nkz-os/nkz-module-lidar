@@ -98,5 +98,6 @@
   "errorNoGeometry": "La géométrie de l'entité est requise pour le téléchargement PNOA.",
   "loadingMetadata": "Chargement des détails de l'entité...",
   "noParcelSelected": "Aucune parcelle sélectionnée",
-  "selectParcelToUpload": "Sélectionnez une parcelle sur la carte pour télécharger des données LiDAR."
+  "selectParcelToUpload": "Sélectionnez une parcelle sur la carte pour télécharger des données LiDAR.",
+"noPolygonBoundary": "Cette parcelle n'a pas de contour polygonal. Le traitement LiDAR nécessite un polygone de parcelle pour découper le nuage de points."
 }

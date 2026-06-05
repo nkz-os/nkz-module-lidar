@@ -98,5 +98,6 @@
 "heightOffset": "Altuera doikuntza",
 "cancelProcessing": "Prozesamendua utzi",
 "uploadedFiles": "Igotako Fitxategiak",
-"errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko."
+"errorNoGeometry": "Entitatearen geometria beharrezkoa da PNOA deskargatzeko.",
+"noPolygonBoundary": "Partzela honek ez du poligono ingerada. LiDAR prozesamenduak partzelaren poligonoa behar du puntu-hodeia mozteko."
 }
