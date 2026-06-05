@@ -98,5 +98,6 @@
   "errorNoGeometry": "A geometria da entidade é necessária para o download do PNOA.",
   "loadingMetadata": "A carregar detalhes da entidade...",
   "noParcelSelected": "Nenhuma parcela selecionada",
-  "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR."
+  "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR.",
+"noPolygonBoundary": "Esta parcela não tem contorno poligonal. O processamento LiDAR requer um polígono de parcela para recortar a nuvem de pontos."
 }

@@ -98,5 +98,6 @@
   "errorNoGeometry": "Es requereix la geometria de l'entitat per a la descàrrega del PNOA.",
   "loadingMetadata": "Carregant detalls de l'entitat...",
   "noParcelSelected": "Cap parcel·la seleccionada",
-  "selectParcelToUpload": "Selecciona una parcel·la del mapa per pujar o descarregar dades LiDAR."
+  "selectParcelToUpload": "Selecciona una parcel·la del mapa per pujar o descarregar dades LiDAR.",
+"noPolygonBoundary": "Aquesta parcel·la no té contorn poligonal. El processament LiDAR requereix un polígon de parcel·la per retallar el núvol de punts."
 }
