@@ -965,7 +965,30 @@ class LidarPipeline:
         return None
 
     def _reproject_crop_polygon(self, geometry_wkt: str) -> str:
-        """Reproject crop polygon from WGS84 to match the LAZ file's CRS if needed."""
+        """Reproject crop polygon from WGS84 to match the LAZ file's CRS if needed.
+        
+        Raises ValueError if geometry is not Polygon or MultiPolygon (PDAL
+        filters.crop requires these specific types).
+        """
+        from shapely.wkt import loads as wkt_loads
+        
+        geom = wkt_loads(geometry_wkt)
+        
+        # ── Hard gate: PDAL filters.crop requires Polygon or MultiPolygon ──
+        # Other geometry types (Point, LineString, GeometryCollection, etc.)
+        # cause a C++ runtime error deep inside PDAL's OGR layer:
+        #   "pdal::Polygon() cannot construct geometry because OGR geometry
+        #    is not Polygon or MultiPolygon"
+        # This check fails fast with an actionable message instead.
+        if geom.geom_type not in ('Polygon', 'MultiPolygon'):
+            raise ValueError(
+                f"PDAL crop requires Polygon or MultiPolygon geometry. "
+                f"Received: {geom.geom_type}. "
+                f"This parcel may only have a centroid (Point) — LiDAR processing "
+                f"requires a polygon boundary. The frontend and API should have "
+                f"rejected this before reaching the pipeline."
+            )
+        
         laz_crs = self._get_laz_crs()
         if not laz_crs:
             logger.warning("Could not determine LAZ CRS, using crop polygon as-is (WGS84)")
@@ -981,11 +1004,17 @@ class LidarPipeline:
             laz_epsg = laz_crs.to_epsg() or laz_crs.name
             logger.info(f"Reprojecting crop polygon from EPSG:4326 to {laz_epsg}")
 
-            geom = wkt_loads(geometry_wkt)
             transformer = pyproj.Transformer.from_crs(
                 parcel_crs, laz_crs, always_xy=True
             )
             reprojected = shapely_transform(transformer.transform, geom)
+
+            # Verify reprojection didn't change the geometry type
+            if reprojected.geom_type not in ('Polygon', 'MultiPolygon'):
+                raise ValueError(
+                    f"CRS reprojection changed geometry type from {geom.geom_type} "
+                    f"to {reprojected.geom_type}. Crop polygon cannot be used."
+                )
 
             return reprojected.wkt
         except Exception as e:
