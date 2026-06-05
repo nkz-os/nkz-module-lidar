@@ -33,22 +33,31 @@ function geoJsonToWkt(geojson: GeoJSONGeometry): string | null {
   const formatCoord = (coord: number[]) => `${coord[0]} ${coord[1]}`;
   const formatRing = (ring: number[][]) => ring.map(formatCoord).join(', ');
 
+  // PDAL filters.crop requires Polygon or MultiPolygon.
+  // Other geometry types (Point, LineString, GeometryCollection, etc.)
+  // cannot be used for point-cloud cropping.
   switch (geojson.type) {
-    case 'Point':
-      return `POINT(${formatCoord(geojson.coordinates)})`;
-    case 'LineString':
-      return `LINESTRING(${formatRing(geojson.coordinates)})`;
     case 'Polygon': {
-      const rings = geojson.coordinates.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ');
+      const rings = geojson.coordinates.map(
+        (ring: number[][]) => `(${formatRing(ring)})`
+      ).join(', ');
       return `POLYGON(${rings})`;
     }
     case 'MultiPolygon': {
-      const polys = geojson.coordinates.map((poly: number[][][]) =>
-        `(${poly.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ')})`
+      const polys = geojson.coordinates.map(
+        (poly: number[][][]) =>
+          `(${poly.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ')})`
       ).join(', ');
       return `MULTIPOLYGON(${polys})`;
     }
     default:
+      // Point, LineString, MultiPoint, MultiLineString, GeometryCollection, etc.
+      // are NOT valid crop geometries for PDAL.
+      console.warn(
+        `[lidar] Geometry type "${geojson.type}" is not supported for LiDAR crop. ` +
+        `Only Polygon and MultiPolygon are valid. This parcel may only have a centroid — ` +
+        `LiDAR processing requires a polygon boundary.`
+      );
       return null;
   }
 }

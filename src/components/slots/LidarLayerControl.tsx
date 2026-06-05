@@ -527,11 +527,17 @@ const LidarLayerControl: React.FC = () => {
               variant="primary"
               size="md"
               onClick={handleStartProcessing}
-              disabled={isProcessing || !hasCoverage}
+              disabled={isProcessing || !hasCoverage || !selectedEntityGeometry}
               leadingIcon={<Database className="w-4 h-4" />}
             >
               {hasCoverage ? t('downloadPnoa') : t('noCoverage')}
             </Button>
+            {!selectedEntityGeometry && selectedEntityId && (
+              <p className="text-xs text-nkz-warning mt-1">
+                Esta parcela no tiene contorno poligonal. El procesamiento LiDAR requiere 
+                un polígono de parcela para recortar la nube de puntos.
+              </p>
+            )}
 
             {/* Divider */}
             <div className="flex items-center gap-nkz-inline">
