@@ -19,7 +19,7 @@ import uuid
 from typing import Optional, Tuple
 
 from redis import Redis
-from rq import Connection, Queue, Worker
+from rq import Queue, Worker
 from rq.job import Job
 from rq.registry import FailedJobRegistry
 
@@ -44,8 +44,8 @@ class NoMaintenanceWorker(Worker):
     def run_maintenance_tasks(self) -> None:
         """No-op: skip RQ registry cleaning to avoid CPU hang, but still
         mark the maintenance cycle as completed so the loop doesn't spin."""
-        from rq.utils import utcnow
-        self.last_cleaned_at = utcnow()
+        from datetime import datetime, timezone
+        self.last_cleaned_at = datetime.now(timezone.utc)
 
     def subscribe(self) -> None:
         """No-op: disable pubsub thread to avoid redis-py 5.0.1 busy-loop."""
@@ -205,19 +205,19 @@ def run_worker():
     # the still-active Redis registration of the dying container.
     worker_name = f"lidar-worker-{socket.gethostname()}-{uuid.uuid4().hex[:6]}"
 
-    with Connection(redis_conn):
-        queues = [Queue(settings.WORKER_QUEUE_NAME)]
+    queues = [Queue(settings.WORKER_QUEUE_NAME, connection=redis_conn)]
 
-        worker = NoMaintenanceWorker(
-            queues,
-            name=worker_name,
-            default_worker_ttl=settings.WORKER_TIMEOUT,
-            exception_handlers=[_rq_exception_handler],
-            work_horse_killed_handler=_work_horse_killed_handler,
-        )
+    worker = NoMaintenanceWorker(
+        queues,
+        name=worker_name,
+        connection=redis_conn,
+        default_worker_ttl=settings.WORKER_TIMEOUT,
+        exception_handlers=[_rq_exception_handler],
+        work_horse_killed_handler=_work_horse_killed_handler,
+    )
 
-        logger.info("Worker ready. Waiting for jobs...")
-        worker.work()
+    logger.info("Worker ready. Waiting for jobs...")
+    worker.work()
 
 
 if __name__ == "__main__":

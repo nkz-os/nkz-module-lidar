@@ -17,7 +17,7 @@ pyjwt==2.8.0
 cryptography==41.0.7
 
 # Redis Queue for async job processing
-rq>=1.16.0,<2.0.0
+rq>=2.0.0
 redis==5.0.1
 
 # Rate limiting
