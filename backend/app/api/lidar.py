@@ -10,7 +10,7 @@ from uuid import uuid4
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from redis import Redis
 from rq import Queue
 
@@ -41,6 +41,22 @@ lidar_job_duration = Histogram(
 # Request/Response Models
 # ============================================================================
 
+def validate_crop_geometry(geometry_wkt: str | None) -> str | None:
+    """Validate that geometry WKT is Polygon or MultiPolygon for PDAL crop.
+    
+    Returns the WKT string if valid, None if empty (skip crop), or raises ValueError.
+    """
+    if not geometry_wkt or not geometry_wkt.strip():
+        return None
+    upper = geometry_wkt.strip().upper()
+    if not (upper.startswith('POLYGON') or upper.startswith('MULTIPOLYGON')):
+        received_type = geometry_wkt.split('(')[0].strip() if '(' in geometry_wkt else geometry_wkt[:50]
+        raise ValueError(
+            f'Geometry must be POLYGON or MULTIPOLYGON for LiDAR crop. '
+            f'Received: {received_type}.'
+        )
+    return geometry_wkt
+
 class ProcessingConfig(BaseModel):
     """Configuration for LiDAR processing job."""
     colorize_by: str = Field(default="height", description="Color mode: height, classification, heightAboveGround, canopyCover, verticalDensity, rgb")
@@ -55,6 +71,31 @@ class ProcessRequest(BaseModel):
     parcel_id: str = Field(..., description="Orion-LD AgriParcel entity ID")
     parcel_geometry_wkt: str = Field(..., description="WKT representation of parcel boundary")
     config: ProcessingConfig = Field(default_factory=ProcessingConfig)
+
+    @field_validator('parcel_geometry_wkt')
+    @classmethod
+    def must_be_polygon_or_multipolygon(cls, v: str) -> str:
+        """Validate that the geometry WKT is a Polygon or MultiPolygon.
+
+        PDAL's filters.crop stage requires Polygon or MultiPolygon geometry.
+        Point, LineString, and other OGR geometry types will cause a C++ runtime
+        error that kills the processing job.
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                'parcel_geometry_wkt is required for LiDAR processing. '
+                'This parcel may not have a polygon boundary.'
+            )
+        upper = v.strip().upper()
+        if not (upper.startswith('POLYGON') or upper.startswith('MULTIPOLYGON')):
+            received_type = v.split('(')[0].strip() if '(' in v else v[:50]
+            raise ValueError(
+                f'Geometry must be POLYGON or MULTIPOLYGON for LiDAR crop. '
+                f'Received geometry type: {received_type}. '
+                f'This parcel may only have a centroid (Point). '
+                f'LiDAR processing requires a polygon boundary.'
+            )
+        return v
 
 
 class ProcessResponse(BaseModel):
@@ -151,6 +192,11 @@ async def start_processing(
     Returns immediately with job ID for status polling.
     """
     logger.info(f"Processing request for parcel {body.parcel_id} by tenant {tenant_id}")
+
+    try:
+        validate_crop_geometry(body.parcel_geometry_wkt)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     # Check coverage first
     indexer = PNOAIndexer()
@@ -474,6 +520,12 @@ async def upload_laz_file(
             status_code=400,
             detail="Only .LAZ and .LAS files are supported"
         )
+        
+    try:
+        geometry_wkt = validate_crop_geometry(geometry_wkt)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     
     # Parse config JSON
     try:
