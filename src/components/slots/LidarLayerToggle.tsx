@@ -57,8 +57,8 @@ const LidarLayerToggle: React.FC = () => {
   };
 
   const disabledReason =
-    isProcessing ? t('processing', 'Procesando…')
-    : !hasAnyLayer ? t('noLayers', 'Sin tilesets')
+    isProcessing ? (t('processing') || 'Procesando…')
+    : !hasAnyLayer ? (t('noLayers') || 'Sin tilesets')
     : undefined;
 
   return (
@@ -72,9 +72,9 @@ const LidarLayerToggle: React.FC = () => {
       scope={layerScope}
       onScopeChange={setLayerScope}
       disabledReason={disabledReason}
-      scopeLabel={t('layerToggle.scope', 'Ámbito')}
-      selectedLabel={t('layerToggle.selected', 'Seleccionada')}
-      allLabel={t('layerToggle.all', 'Todas')}
+      scopeLabel={t('layerToggle.scope') || 'Ámbito'}
+      selectedLabel={t('layerToggle.selected') || 'Seleccionada'}
+      allLabel={t('layerToggle.all') || 'Todas'}
       mode={
         <div className="flex flex-wrap gap-nkz-tight">
           {COLOR_MODES.map(m => (

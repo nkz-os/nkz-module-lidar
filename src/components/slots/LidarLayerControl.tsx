@@ -13,11 +13,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Layers,
   Upload,
-  Settings,
   RefreshCw,
   CheckCircle,
   XCircle,
-  TreeDeciduous,
   Palette,
   Sparkles,
   Cloud,
@@ -95,7 +93,7 @@ const LidarLayerControl: React.FC = () => {
     deleteLayer,
   } = context;
 
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, _setShowSettings] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -323,6 +321,7 @@ const LidarLayerControl: React.FC = () => {
 
   return (
     <SlotShell
+      moduleId="lidar"
       title="Control LiDAR"
       icon={<Layers className="w-4 h-4" />}
       collapsible
@@ -347,7 +346,7 @@ const LidarLayerControl: React.FC = () => {
                 </label>
                 <Select
                   value={processingConfig.colorize_by}
-                  onChange={(v) => setProcessingConfig({
+                  onValueChange={(v: string) => setProcessingConfig({
                     ...processingConfig,
                     colorize_by: v as ColorMode
                   })}

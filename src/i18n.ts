@@ -1,4 +1,7 @@
-import { i18n } from '@nekazari/sdk';
+// i18n is exposed by the host via window.__nekazariI18n;
+// @nekazari/sdk does not export it directly.
+const i18n = (window as any).__nekazariI18n?.i18n;
+
 import en from './locales/en.json';
 import es from './locales/es.json';
 import ca from './locales/ca.json';
