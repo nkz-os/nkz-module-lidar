@@ -4,7 +4,6 @@
   "description": "LIDAR Point Cloud Viewer for Nekazari Platform - Visualize LAZ files from IDENA in CesiumJS",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "pnpm@9.0.0",
   "main": "./src/Module.tsx",
   "nkz": {
     "moduleId": "lidar"
