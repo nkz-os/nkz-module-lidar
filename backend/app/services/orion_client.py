@@ -241,6 +241,62 @@ class OrionLDClient:
         }
         await self._request("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
 
+    # ── VegetationIndex (NDVI raster) cross-module integration ────────
+
+    def get_latest_ndvi_raster(self, parcel_id: str) -> Optional[str]:
+        """Query Orion for the most recent NDVI raster URL for a parcel.
+
+        Vegetation-health publishes VegetationIndex entities with
+        rasterURL, sensingDate, and refAgriParcel. This method returns
+        the rasterURL of the latest completed analysis, converted from
+        S3 to HTTP URL for use as PDAL colorization source.
+
+        Returns None when no VegetationIndex exists for the parcel.
+        """
+        parcel_urn = self._parcel_urn(parcel_id)
+        q = f'refAgriParcel=="{parcel_urn}"'
+        try:
+            entities = self._request_sync(
+                "GET",
+                f"/ngsi-ld/v1/entities?type=VegetationIndex&q={q}&limit=10&options=keyValues",
+            ) or []
+        except Exception:
+            logger.warning("Failed to query VegetationIndex for parcel %s", parcel_id)
+            return None
+
+        if not entities:
+            return None
+
+        # Pick the most recent by sensingDate
+        best = None
+        best_date = ""
+        for e in (entities if isinstance(entities, list) else [entities]):
+            sd = e.get("sensingDate", "")
+            if sd > best_date:
+                best_date = sd
+                best = e
+
+        if not best:
+            return None
+
+        raster_url = best.get("rasterURL", "")
+        if not raster_url:
+            return None
+
+        # Convert S3 URL to HTTP URL (MinIO public endpoint)
+        # s3://bucket/path -> https://minio.robotika.cloud/bucket/path
+        if raster_url.startswith("s3://"):
+            path = raster_url[5:]  # remove "s3://"
+            bucket, _, key = path.partition("/")
+            minio_public = settings.MINIO_PUBLIC_BASE_URL.rstrip("/")
+            raster_url = f"{minio_public}/{bucket}/{key}"
+
+        logger.info(
+            "Found latest NDVI raster for parcel %s (sensing %s): %s",
+            parcel_id, best_date, raster_url,
+        )
+        return raster_url
+
 
 def get_orion_client(tenant_id: Optional[str] = None) -> OrionLDClient:
     return OrionLDClient(tenant_id=tenant_id)

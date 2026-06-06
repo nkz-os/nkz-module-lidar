@@ -138,13 +138,29 @@ class LidarPipeline:
             ndvi_url = config.get("ndvi_source_url")
             colorize_by = config.get("colorize_by", "height")
 
+            # Auto-fetch NDVI raster from VegetationIndex (Orion-LD) when
+            # user requests NDVI colorization but didn't supply a raster URL.
+            if colorize_by == "ndvi" and not ndvi_url:
+                try:
+                    client = get_orion_client(self.tenant_id)
+                    ndvi_url = client.get_latest_ndvi_raster(self.parcel_id)
+                    if ndvi_url:
+                        logger.info("Auto-fetched NDVI raster from VegetationIndex: %s", ndvi_url)
+                    else:
+                        logger.info("No VegetationIndex found for parcel %s — skipping NDVI", self.parcel_id)
+                except Exception as exc:
+                    logger.warning("Could not auto-fetch NDVI raster: %s", exc)
+
             if colorize_by == "ndvi" and ndvi_url:
                 self.update_job_status("processing", 30, "Applying NDVI colorization...")
                 self.phase_b_spectral_fusion(ndvi_url)
             else:
                 # Just copy cropped to colored path
                 self.colored_laz = self.cropped_laz
-                self.update_job_status("processing", 30, "Skipping spectral fusion (no NDVI source)")
+                if colorize_by == "ndvi":
+                    self.update_job_status("processing", 30, "Skipping NDVI — no raster available for this parcel")
+                else:
+                    self.update_job_status("processing", 30, "Skipping spectral fusion (no NDVI source)")
 
             # Derived products: DTM, DSM, CHM (always generated for cross-module consumption)
             self.update_job_status("processing", 40, "Generating DTM/DSM/CHM...")
