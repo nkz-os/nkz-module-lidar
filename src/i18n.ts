@@ -1,6 +1,9 @@
 // i18n is exposed by the host via window.__nekazariI18n;
 // @nekazari/sdk does not export it directly.
-const i18n = (window as any).__nekazariI18n?.i18n;
+// Guard against SSR/build where window is undefined.
+const i18n = typeof window !== 'undefined'
+  ? (window as any).__nekazariI18n?.i18n
+  : undefined;
 
 import en from './locales/en.json';
 import es from './locales/es.json';
