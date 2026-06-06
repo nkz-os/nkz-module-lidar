@@ -159,7 +159,7 @@ class OrionLDClient:
             f"/ngsi-ld/v1/entities?type=DataProcessingJob&q=jobType==\"lidar\"&limit={limit}&offset={offset}",
         )) or []
 
-    async def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None) -> str:
+    async def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None, z_min: Optional[float] = None, z_max: Optional[float] = None) -> str:
         entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
         entity = {
             "@context": self.CONTEXT,
@@ -182,10 +182,14 @@ class OrionLDClient:
             entity["chmUrl"] = {"type": "Property", "value": chm_url}
         if classified_laz_url:
             entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
+        if z_min is not None:
+            entity["zMin"] = {"type": "Property", "value": z_min}
+        if z_max is not None:
+            entity["zMax"] = {"type": "Property", "value": z_max}
         await self._request("POST", "/ngsi-ld/v1/entities", entity)
         return entity_id
 
-    def create_digital_asset_sync(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None) -> str:
+    def create_digital_asset_sync(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None, z_min: Optional[float] = None, z_max: Optional[float] = None) -> str:
         """Synchronous version for worker/pipeline use."""
         entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
         entity = {
@@ -209,6 +213,10 @@ class OrionLDClient:
             entity["chmUrl"] = {"type": "Property", "value": chm_url}
         if classified_laz_url:
             entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
+        if z_min is not None:
+            entity["zMin"] = {"type": "Property", "value": z_min}
+        if z_max is not None:
+            entity["zMax"] = {"type": "Property", "value": z_max}
         self._request_sync("POST", "/ngsi-ld/v1/entities", entity)
         return entity_id
 
