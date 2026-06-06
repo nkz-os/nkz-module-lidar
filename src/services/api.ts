@@ -60,6 +60,8 @@ export interface Layer {
     source: string;
     point_count?: number;
     date_observed?: string;
+    z_min?: number;
+    z_max?: number;
 }
 
 export interface DetectedTree {

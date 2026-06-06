@@ -137,6 +137,8 @@ class LayerResponse(BaseModel):
     source: str
     point_count: Optional[int]
     date_observed: Optional[str]
+    z_min: Optional[float] = None
+    z_max: Optional[float] = None
 
 
 # ============================================================================
@@ -347,6 +349,8 @@ async def get_layers(
             source=_prop(l, "source", "PNOA"),
             point_count=_prop(l, "pointCount"),
             date_observed=_prop(l, "dateObserved"),
+            z_min=_prop(l, "zMin"),
+            z_max=_prop(l, "zMax"),
         )
         for l in layers
     ]
@@ -374,6 +378,8 @@ async def get_layer(
         source=_prop(layer, "source", "PNOA"),
         point_count=_prop(layer, "pointCount"),
         date_observed=_prop(layer, "dateObserved"),
+        z_min=_prop(layer, "zMin"),
+        z_max=_prop(layer, "zMax"),
     )
 
 

@@ -77,6 +77,8 @@ class LidarPipeline:
         self.dtm_path: Optional[str] = None
         self.dsm_path: Optional[str] = None
         self.chm_path: Optional[str] = None
+        self.z_min: Optional[float] = None
+        self.z_max: Optional[float] = None
         self.detected_trees: List[Dict[str, Any]] = []
         self.source_crs: Optional[str] = None
         self.bounds_validator = GeoBoundsValidator(
@@ -345,11 +347,14 @@ class LidarPipeline:
         if isinstance(bounds_meta, str):
             bounds_meta = json.loads(bounds_meta)
         # PDAL metadata: readers.las → minx/miny/maxx/maxy
-        las_meta = bounds_meta.get("metadata", {})
+        las_meta = bounds_meta.get("metadata", {}).get("readers.las", {})
         minx = las_meta.get("minx", 0)
         miny = las_meta.get("miny", 0)
         maxx = las_meta.get("maxx", 0)
         maxy = las_meta.get("maxy", 0)
+        # Also capture Z range for frontend height colorization
+        self.z_min = las_meta.get("minz", None)
+        self.z_max = las_meta.get("maxz", None)
         # PDAL bounds string: "([minx,maxx],[miny,maxy])"
         bounds_str = f"([{minx},{maxx}],[{miny},{maxy}])"
         logger.info(f"DTM/DSM bounds from source: {bounds_str}")
@@ -907,6 +912,8 @@ class LidarPipeline:
             dsm_url=upload_urls.get("dsm"),
             chm_url=upload_urls.get("chm"),
             classified_laz_url=upload_urls.get("classified_laz"),
+            z_min=self.z_min,
+            z_max=self.z_max,
         )
         self.update_job_status(
             "completed",

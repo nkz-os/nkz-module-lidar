@@ -322,11 +322,12 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         console.log('[LidarContext] Auto-activating layer:', fetchedLayers[0].id, 'url:', fetchedLayers[0].tileset_url);
         setSelectedLayerId(fetchedLayers[0].id);
         setActiveTilesetUrl(fetchedLayers[0].tileset_url);
+        setLayerVisible(true);
       }
     } catch (error) {
       console.error('[LidarContext] Failed to refresh layers:', error);
     }
-  }, [viewer.selectedEntityId, selectedLayerId]);
+  }, [viewer.selectedEntityId, selectedLayerId, setLayerVisible]);
 
   // Notify other LidarProvider instances to re-fetch layers
   const notifyOtherProviders = useCallback(() => {

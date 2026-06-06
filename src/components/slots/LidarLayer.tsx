@@ -50,17 +50,36 @@ interface LidarLayerProps {
 // rendered with the default white style.
 type StyleColor = string | { conditions: [string, string][] };
 
+/** Build a dynamic height-colorization expression using actual Z range. */
+function buildHeightExpression(zMin: number, zMax: number): string {
+  const span = zMax - zMin || 1;
+  // Local Z values from py3dtiles .pnts are ECEF / 100 — use raw local values.
+  // Normalize Z into 0-1 range and interpolate blue→green→red.
+  // eslint-disable-next-line no-template-curly-in-string
+  return `
+    mix(
+      mix(color('blue'), color('green'), clamp((\${POSITION}[2] - ${zMin}) / (${span} * 0.5), 0.0, 1.0)),
+      color('red'),
+      clamp(((\${POSITION}[2] - ${zMin}) / ${span} - 0.5) * 2.0, 0.0, 1.0)
+    )
+  `;
+}
+
 const COLOR_RAMPS: Record<string, StyleColor> = {
-  // Height: blue (low) → green (mid) → red (high), measured along the
-  // tile-local Z axis clamped to a 0–50 m relative window.
+  // Height: blue (low) → green (mid) → red (high).
+  // The default expression below is a fallback for layers without zMin/zMax.
+  // LidarLayer.tsx overrides it dynamically via buildHeightExpression().
   height: `
-    \${POSITION}[2] < 25.0
-      ? mix(color('blue'), color('green'), clamp(\${POSITION}[2] / 25.0, 0.0, 1.0))
-      : mix(color('green'), color('red'), clamp((\${POSITION}[2] - 25.0) / 25.0, 0.0, 1.0))
+    mix(
+      mix(color('blue'), color('green'), clamp((\${POSITION}[2] - 2.0) / 2.0, 0.0, 1.0)),
+      color('red'),
+      clamp((\${POSITION}[2] - 3.0) / 2.0, 0.0, 1.0)
+    )
   `,
 
   // NDVI: red (unhealthy) → yellow (neutral) → green (healthy).
-  // Negative NDVI is clamped to 0 to keep the gradient monotonic.
+  // Requires NDVI dimension in batch table (only present when ndvi_source_url
+  // was provided during processing). Falls back to green when absent.
   ndvi: `
     \${NDVI} < 0.5
       ? mix(color('red'), color('yellow'), clamp(\${NDVI} * 2.0, 0.0, 1.0))
@@ -72,7 +91,8 @@ const COLOR_RAMPS: Record<string, StyleColor> = {
 
   // Classification: standard ASPRS LAS class palette. py3dtiles is invoked
   // with --classification so the Classification dimension reaches the
-  // batch table.
+  // batch table. If input .laz lacks proper classification, all points
+  // fall into the 'true' catch-all (lightgray).
   classification: {
     conditions: [
       ['${Classification} === 2', "color('saddlebrown')"],
@@ -98,23 +118,36 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   // useTheme kept for parity with original — may be used by future styling extensions
-  const _theme = useTheme();
+  void useTheme();
 
   // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
   const contextViewer = useCesiumViewer();
   const viewer = viewerProp || contextViewer;
 
+  // Extract Z range from active layer for dynamic height colorization
+  const activeLayer = layers.find((l: any) => l.id === selectedLayerId) ?? layers[0];
+  const layerZMin: number | undefined = activeLayer?.z_min ?? undefined;
+  const layerZMax: number | undefined = activeLayer?.z_max ?? undefined;
+
   /**
-   * Create style expression for current color mode
+   * Create style expression for current color mode.
+   *
+   * For height mode, zMin/zMax (from layer metadata) are used to normalize
+   * the color ramp across the actual point cloud vertical extent. When
+   * unavailable, a sensible default range of 2-5 local Z units is used.
    */
-  const createStyle = useCallback((mode: ColorMode) => {
+  const createStyle = useCallback((mode: ColorMode, zMin?: number, zMax?: number) => {
     // @ts-ignore - Cesium is loaded globally by the host
     const Cesium = window.Cesium;
     if (!Cesium) return null;
 
     try {
+      let color: StyleColor = COLOR_RAMPS[mode] || COLOR_RAMPS.height;
+      if (mode === 'height' && zMin != null && zMax != null && zMax > zMin) {
+        color = buildHeightExpression(zMin, zMax);
+      }
       return new Cesium.Cesium3DTileStyle({
-        color: COLOR_RAMPS[mode] || COLOR_RAMPS.height,
+        color,
         pointSize: 5,
       });
     } catch (error) {
@@ -208,7 +241,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
             }
           }
 
-          const style = createStyle(colorMode);
+          const style = createStyle(colorMode, layerZMin, layerZMax);
           if (style) tileset.style = style;
           viewer.scene.primitives.add(tileset);
           tilesetRefs.current.push(tileset);
@@ -251,17 +284,17 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
       });
       tilesetRefs.current = [];
     };
-  }, [viewer, layerScope, layerVisible, activeTilesetUrl, layers, selectedLayerId, heightOffset, createStyle, colorMode]);
+  }, [viewer, layerScope, layerVisible, activeTilesetUrl, layers, selectedLayerId, heightOffset, createStyle, colorMode, layerZMin, layerZMax]);
 
   /**
    * Update style when color mode changes without reloading tilesets.
    */
   useEffect(() => {
     if (tilesetRefs.current.length === 0) return;
-    const style = createStyle(colorMode);
+    const style = createStyle(colorMode, layerZMin, layerZMax);
     if (!style) return;
     tilesetRefs.current.forEach(ts => { ts.style = style; });
-  }, [colorMode, createStyle]);
+  }, [colorMode, createStyle, layerZMin, layerZMax]);
 
   // Show loading indicator while tileset(s) load
   if (layerVisible && isLoading) {
