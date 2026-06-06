@@ -40,6 +40,7 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
 
   return (
     <SlotShell
+      moduleId="lidar"
       title={t('config.title')}
       icon={<Layers className="w-4 h-4" />}
       accent={lidarAccent}
