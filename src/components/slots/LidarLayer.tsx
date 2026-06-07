@@ -180,10 +180,13 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
     }
 
     const targets: { id: string; url: string }[] = [];
+    // Max concurrent tilesets: scope 'all' loads at most 3 to avoid GPU VRAM exhaustion.
+    const MAX_TILESETS_ALL = 3;
     if (layerScope === 'all') {
       layers.forEach((l: any) => {
         if (l && l.tileset_url) targets.push({ id: l.id, url: l.tileset_url });
       });
+      if (targets.length > MAX_TILESETS_ALL) targets.length = MAX_TILESETS_ALL;
     } else if (activeTilesetUrl) {
       targets.push({ id: selectedLayerId ?? 'active', url: activeTilesetUrl });
     }
@@ -206,10 +209,10 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
         try {
           const options = {
             maximumScreenSpaceError: sse,
-            maximumMemoryUsage: 1024,
+            maximumMemoryUsage: 256,
             dynamicScreenSpaceError: true,
             dynamicScreenSpaceErrorDensity: 0.00278,
-            dynamicScreenSpaceErrorFactor: 4.0,
+            dynamicScreenSpaceErrorFactor: 1.5,
           };
 
           let tileset: CesiumTilesetType;
