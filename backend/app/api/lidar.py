@@ -344,7 +344,7 @@ async def get_layers(
     return [
         LayerResponse(
             id=l.get("id", "").split(":")[-1],
-            parcel_id=l.get("refAgriParcel", {}).get("object", ""),
+            parcel_id=l.get("hasAgriParcel", {}).get("object", ""),
             tileset_url=_prop(l, "resourceURL", ""),
             source=_prop(l, "source", "PNOA"),
             point_count=_prop(l, "pointCount"),
@@ -373,7 +373,7 @@ async def get_layer(
 
     return LayerResponse(
         id=layer_id,
-        parcel_id=layer.get("refAgriParcel", {}).get("object", ""),
+        parcel_id=layer.get("hasAgriParcel", {}).get("object", ""),
         tileset_url=_prop(layer, "resourceURL", ""),
         source=_prop(layer, "source", "PNOA"),
         point_count=_prop(layer, "pointCount"),
@@ -470,13 +470,13 @@ async def list_jobs(
     if status_filter:
         jobs = [j for j in jobs if _prop(j, "status") == status_filter]
     if parcel_id:
-        jobs = [j for j in jobs if j.get("refAgriParcel", {}).get("object", "").endswith(parcel_id)]
+        jobs = [j for j in jobs if j.get("hasAgriParcel", {}).get("object", "").endswith(parcel_id)]
     
     return {
         "jobs": [
             {
                 "id": job.get("id", "").split(":")[-1],
-                "parcel_id": job.get("refAgriParcel", {}).get("object", ""),
+                "parcel_id": job.get("hasAgriParcel", {}).get("object", ""),
                 "status": _prop(job, "status", "queued"),
                 "progress": _prop(job, "progress", 0),
                 "created_at": _prop(job, "createdAt", ""),
@@ -746,7 +746,7 @@ async def export_derived_product(
     should first discover available layers via the Orion-LD Context Broker:
 
     ```
-    GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&refAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
+    GET /ngsi-ld/v1/entities?type=DigitalAsset&q=assetCategory=="LiDAR"&hasAgriParcel=="urn:ngsi-ld:AgriParcel:<id>"
     ```
 
     The response includes NGSI-LD attributes (`dtmUrl`, `dsmUrl`, `chmUrl`,
