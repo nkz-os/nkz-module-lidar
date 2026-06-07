@@ -1057,7 +1057,7 @@ def process_lidar_job(job_entity_id: str, tenant_id: str):
     logger.info("Worker starting job: %s", job_entity_id)
     client = get_orion_client(tenant_id)
     job = client.get_job_sync(job_entity_id)
-    parcel_urn = job.get("refAgriParcel", {}).get("object", "")
+    parcel_urn = job.get("hasAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     geometry_wkt = job.get("parcelGeometryWKT", {}).get("value", "")
     config = job.get("config", {}).get("value", {}) or {}
@@ -1085,7 +1085,7 @@ def process_uploaded_file(job_entity_id: str, tenant_id: str, file_path: str, ge
     logger.info("Worker starting upload job: %s (file key: %s)", job_entity_id, file_path)
     client = get_orion_client(tenant_id)
     job = client.get_job_sync(job_entity_id)
-    parcel_urn = job.get("refAgriParcel", {}).get("object", "")
+    parcel_urn = job.get("hasAgriParcel", {}).get("object", "")
     parcel_id = parcel_urn.split(":")[-1] if parcel_urn else ""
     config = job.get("config", {}).get("value", {}) or {}
     pipeline = LidarPipeline(job_entity_id, tenant_id=tenant_id, parcel_id=parcel_id)

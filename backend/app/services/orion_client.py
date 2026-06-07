@@ -105,7 +105,7 @@ class OrionLDClient:
             "progress": {"type": "Property", "value": 0},
             "statusMessage": {"type": "Property", "value": "queued"},
             "requestedBy": {"type": "Property", "value": user_id},
-            "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
             "parcelGeometryWKT": {"type": "Property", "value": geometry_wkt or ""},
             "config": {"type": "Property", "value": config or {}},
             "createdAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
@@ -125,7 +125,7 @@ class OrionLDClient:
             "progress": {"type": "Property", "value": 0},
             "statusMessage": {"type": "Property", "value": "queued"},
             "requestedBy": {"type": "Property", "value": user_id},
-            "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
             "parcelGeometryWKT": {"type": "Property", "value": geometry_wkt or ""},
             "config": {"type": "Property", "value": config or {}},
             "createdAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
@@ -172,7 +172,7 @@ class OrionLDClient:
             "treeCount": {"type": "Property", "value": tree_count},
             "processingStatus": {"type": "Property", "value": "completed"},
             "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
-            "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
         }
         if dtm_url:
             entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
@@ -203,7 +203,7 @@ class OrionLDClient:
             "treeCount": {"type": "Property", "value": tree_count},
             "processingStatus": {"type": "Property", "value": "completed"},
             "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
-            "refAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
         }
         if dtm_url:
             entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
@@ -223,7 +223,7 @@ class OrionLDClient:
     async def list_assets(self, parcel_id: Optional[str] = None) -> List[Dict[str, Any]]:
         q = 'assetCategory=="LiDAR"'
         if parcel_id:
-            q += f';refAgriParcel=="{self._parcel_urn(parcel_id)}"'
+            q += f';hasAgriParcel=="{self._parcel_urn(parcel_id)}"'
         return (await self._request("GET", f"/ngsi-ld/v1/entities?type=DigitalAsset&q={q}&limit=1000")) or []
 
     async def get_asset(self, entity_id: str) -> Dict[str, Any]:
@@ -247,14 +247,14 @@ class OrionLDClient:
         """Query Orion for the most recent NDVI raster URL for a parcel.
 
         Vegetation-health publishes VegetationIndex entities with
-        rasterURL, sensingDate, and refAgriParcel. This method returns
+        rasterURL, sensingDate, and hasAgriParcel. This method returns
         the rasterURL of the latest completed analysis, converted from
         S3 to HTTP URL for use as PDAL colorization source.
 
         Returns None when no VegetationIndex exists for the parcel.
         """
         parcel_urn = self._parcel_urn(parcel_id)
-        q = f'refAgriParcel=="{parcel_urn}"'
+        q = f'hasAgriParcel=="{parcel_urn}"'
         try:
             entities = self._request_sync(
                 "GET",

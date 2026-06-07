@@ -27,5 +27,5 @@ async def test_create_processing_job_builds_expected_entity(monkeypatch):
     assert captured["method"] == "POST"
     assert captured["endpoint"] == "/ngsi-ld/v1/entities"
     assert captured["json"]["type"] == "DataProcessingJob"
-    assert captured["json"]["refAgriParcel"]["object"] == "urn:ngsi-ld:AgriParcel:parcel-1"
+    assert captured["json"]["hasAgriParcel"]["object"] == "urn:ngsi-ld:AgriParcel:parcel-1"
 
