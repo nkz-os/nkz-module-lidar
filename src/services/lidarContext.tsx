@@ -306,6 +306,13 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     viewer.selectEntity(id, id ? 'AgriParcel' : null);
   }, [viewer]);
 
+  // Track whether we've already auto-selected a layer to prevent infinite
+  // cascade: refreshLayers → setSelectedLayerId → selectedLayerId changes →
+  // refreshLayers ref changes → entity-change effect re-fires → refreshLayers
+  // again → setLayers with new array ref → LidarLayer destroys + recreates
+  // tileset mid-render → Cesium "this._root is undefined" crash.
+  const hasAutoSelectedRef = useRef(false);
+
   // Refresh layers list
   const refreshLayers = useCallback(async () => {
     if (!viewer.selectedEntityId) {
@@ -317,26 +324,21 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const fetchedLayers = await lidarApi.getLayers(viewer.selectedEntityId);
       setLayers(fetchedLayers);
 
-      // Auto-select first layer if available
-      if (fetchedLayers.length > 0 && !selectedLayerId) {
+      // Auto-select first layer if available (once per entity, not on every re-fetch)
+      if (fetchedLayers.length > 0 && !hasAutoSelectedRef.current) {
+        hasAutoSelectedRef.current = true;
         console.log('[LidarContext] Auto-activating layer:', fetchedLayers[0].id, 'url:', fetchedLayers[0].tileset_url);
-        setSelectedLayerId(fetchedLayers[0].id);
-        setActiveTilesetUrl(fetchedLayers[0].tileset_url);
-        setLayerVisible(true);
+        lidarStore.setLayerState(fetchedLayers[0].id, fetchedLayers[0].tileset_url);
+        lidarStore.setLayerVisible(true);
       }
     } catch (error) {
       console.error('[LidarContext] Failed to refresh layers:', error);
     }
-  }, [viewer.selectedEntityId, selectedLayerId, setLayerVisible]);
+  }, [viewer.selectedEntityId]);
 
-  // Notify other LidarProvider instances to re-fetch layers
-  const notifyOtherProviders = useCallback(() => {
-    window.dispatchEvent(new CustomEvent(SYNC_EVENT, {
-      detail: { providerId: providerIdRef.current }
-    }));
-  }, []);
-
-  // Listen for sync events from other provider instances
+  // Cross-provider sync of layers now handled entirely by the shared
+  // lidarStore + useSyncExternalStore.  The SYNC_EVENT dispatch is dead
+  // code kept only for the listener below (COLORMODE_EVENT still active).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -379,12 +381,13 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setActiveTilesetUrl(null);
     }
     await refreshLayers();
-    notifyOtherProviders();
-  }, [selectedLayerId, refreshLayers, notifyOtherProviders]);
+  }, [selectedLayerId, refreshLayers]);
 
-  // Refresh layers when entity changes
+  // Refresh layers when entity changes. Resets auto-select flag so a new
+  // parcel gets its first layer auto-activated.
   useEffect(() => {
     if (viewer.selectedEntityId) {
+      hasAutoSelectedRef.current = false;
       refreshLayers();
     }
   }, [viewer.selectedEntityId, refreshLayers]);
@@ -438,11 +441,17 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         abortControllerRef.current.signal,
       );
 
-      // Update with final results
+      // Update with final results.
+      // refreshLayers() already updates the shared lidarStore which all
+      // LidarProvider instances subscribe to via useSyncExternalStore.
+      // Calling notifyOtherProviders() here would trigger a redundant
+      // API fetch in sibling instances, producing a new layers array
+      // reference that causes LidarLayer to destroy + recreate tilesets
+      // mid-render → Cesium "this._root is undefined" crash.
       if (finalStatus.tileset_url) {
         setActiveTilesetUrl(finalStatus.tileset_url);
+        hasAutoSelectedRef.current = false;
         await refreshLayers();
-        notifyOtherProviders();
       }
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
@@ -453,7 +462,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setIsProcessing(false);
       abortControllerRef.current = null;
     }
-  }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers, notifyOtherProviders]);
+  }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers]);
 
   const cancelProcessing = useCallback(async () => {
     abortControllerRef.current?.abort();
