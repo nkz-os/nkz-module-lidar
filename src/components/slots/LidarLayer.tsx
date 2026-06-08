@@ -287,10 +287,12 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
       });
       tilesetRefs.current = [];
     };
-  }, [viewer, layerScope, layerVisible, activeTilesetUrl, layers, selectedLayerId, heightOffset, createStyle, colorMode, layerZMin, layerZMax]);
+  }, [viewer, layerScope, layerVisible, activeTilesetUrl, layers, selectedLayerId]);
 
   /**
-   * Update style when color mode changes without reloading tilesets.
+   * Update style when color mode or Z range changes, without reloading tilesets.
+   * Keeping the Cesium3DTileset alive avoids the "this._root is undefined" crash
+   * that occurs when a tileset is removed from scene.primitives mid-render.
    */
   useEffect(() => {
     if (tilesetRefs.current.length === 0) return;
@@ -298,6 +300,32 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
     if (!style) return;
     tilesetRefs.current.forEach(ts => { ts.style = style; });
   }, [colorMode, createStyle, layerZMin, layerZMax]);
+
+  /**
+   * Update modelMatrix when height offset changes, without reloading tilesets.
+   * Same rationale as the style effect above: avoid destroy+recreate crash.
+   */
+  useEffect(() => {
+    if (tilesetRefs.current.length === 0) return;
+    const Cesium = (window as any).Cesium;
+    if (!Cesium) return;
+    tilesetRefs.current.forEach(ts => {
+      try {
+        if (!ts.boundingSphere || ts.isDestroyed?.()) return;
+        const center = ts.boundingSphere.center;
+        const cartographic = Cesium.Cartographic.fromCartesian(center);
+        const offsetCenter = Cesium.Cartesian3.fromRadians(
+          cartographic.longitude,
+          cartographic.latitude,
+          cartographic.height + heightOffset
+        );
+        const translation = Cesium.Cartesian3.subtract(offsetCenter, center, new Cesium.Cartesian3());
+        ts.modelMatrix = Cesium.Matrix4.fromTranslation(translation);
+      } catch (e) {
+        console.warn('[LidarLayer] Could not update height offset:', e);
+      }
+    });
+  }, [heightOffset]);
 
   // Show loading indicator while tileset(s) load
   if (layerVisible && isLoading) {
