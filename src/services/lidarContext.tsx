@@ -324,12 +324,15 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const fetchedLayers = await lidarApi.getLayers(viewer.selectedEntityId);
       setLayers(fetchedLayers);
 
-      // Auto-select first layer if available (once per entity, not on every re-fetch)
+      // Auto-select first layer if available (once per entity) but do NOT
+      // auto-show it.  The user must explicitly toggle the layer via the
+      // layer-toggle slot.  Auto-visible + auto-flyTo steals the camera
+      // and, when combined with a regional PNOA outage, makes the map
+      // appear completely broken.
       if (fetchedLayers.length > 0 && !hasAutoSelectedRef.current) {
         hasAutoSelectedRef.current = true;
-        console.log('[LidarContext] Auto-activating layer:', fetchedLayers[0].id, 'url:', fetchedLayers[0].tileset_url);
+        console.log('[LidarContext] Auto-selecting layer (not visible):', fetchedLayers[0].id);
         lidarStore.setLayerState(fetchedLayers[0].id, fetchedLayers[0].tileset_url);
-        lidarStore.setLayerVisible(true);
       }
     } catch (error) {
       console.error('[LidarContext] Failed to refresh layers:', error);

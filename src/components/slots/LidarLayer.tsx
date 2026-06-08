@@ -257,21 +257,10 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
 
       if (tilesetRefs.current.length > 0) {
         setIsLoading(false);
-        if (!viewer.isDestroyed()) {
-          try {
-            // Fly to the first loaded tileset (readyPromise compat)
-            const first = tilesetRefs.current[0];
-            if (first.readyPromise) await first.readyPromise;
-            await viewer.flyTo(first, {
-              duration: 1.5,
-              offset: new Cesium.HeadingPitchRange(
-                0,
-                Cesium.Math.toRadians(-45),
-                1000
-              ),
-            });
-          } catch { /* ok */ }
-        }
+        // Deliberately do NOT auto-flyTo the tileset.  The user chooses
+        // when to zoom via the viewer controls.  Auto-flying steals the
+        // camera and, combined with regional PNOA outages, makes the
+        // entire map appear broken.
       } else {
         setIsLoading(false);
         setLoadError('Failed to load point cloud');
