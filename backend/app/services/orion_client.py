@@ -254,14 +254,14 @@ class OrionLDClient:
         Returns None when no VegetationIndex exists for the parcel.
         """
         parcel_urn = self._parcel_urn(parcel_id)
-        q = f'hasAgriParcel=="{parcel_urn}"'
+        q = f'hasAgriParcel=="{parcel_urn}";productType=="NDVI"'
         try:
             entities = self._request_sync(
                 "GET",
-                f"/ngsi-ld/v1/entities?type=VegetationIndex&q={q}&limit=10&options=keyValues",
+                f"/ngsi-ld/v1/entities?type=EOProduct&q={q}&limit=10&options=keyValues",
             ) or []
         except Exception:
-            logger.warning("Failed to query VegetationIndex for parcel %s", parcel_id)
+            logger.warning("Failed to query EOProduct for parcel %s", parcel_id)
             return None
 
         if not entities:
