@@ -42,8 +42,6 @@ import { lidarApi } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
 
-const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
-
 const LidarLayerControl: React.FC = () => {
   const { t } = useTranslation('lidar');
   const context = useLidarContext();
@@ -298,7 +296,7 @@ const LidarLayerControl: React.FC = () => {
 
   if (!selectedEntityId) {
     return (
-      <SlotShell moduleId="lidar" accent={lidarAccent}>
+      <SlotShell moduleId="lidar">
         <EmptyState
           icon={<Layers size={32} />}
           title={t('noParcelSelected')}
@@ -310,7 +308,7 @@ const LidarLayerControl: React.FC = () => {
 
   if (isLoadingMetadata) {
     return (
-      <SlotShell moduleId="lidar" accent={lidarAccent}>
+      <SlotShell moduleId="lidar">
         <div className="flex flex-col items-center justify-center gap-nkz-stack py-nkz-section">
           <Spinner size="md" />
           <p className="text-nkz-sm text-nkz-text-muted font-medium">{t('loadingMetadata')}</p>
@@ -325,7 +323,6 @@ const LidarLayerControl: React.FC = () => {
       title="Control LiDAR"
       icon={<Layers className="w-4 h-4" />}
       collapsible
-      accent={lidarAccent}
     >
       <Stack gap="stack">
         {/* Settings Panel */}

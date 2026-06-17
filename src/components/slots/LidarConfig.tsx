@@ -14,8 +14,6 @@ import { useLidarContext } from '../../services/lidarContext';
 import TreeInfo from './TreeInfo';
 import type { TreeData } from '../../types';
 
-const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
-
 interface LidarConfigProps {
   selectedTree?: TreeData | null;
 }
@@ -43,7 +41,6 @@ const LidarConfig: React.FC<LidarConfigProps> = ({ selectedTree }) => {
       moduleId="lidar"
       title={t('config.title')}
       icon={<Layers className="w-4 h-4" />}
-      accent={lidarAccent}
     >
       <Stack gap="stack">
         <FormGrid columns={1}>
