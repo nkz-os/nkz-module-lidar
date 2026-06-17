@@ -10,14 +10,13 @@ import re
 import os
 
 from app.config import settings
+from app.common.tenant_utils import normalize_tenant_id
 
 logger = logging.getLogger(__name__)
 
 
 def _make_headers(tenant_id: str) -> dict:
-    n = tenant_id.lower().strip().replace('-', '_').replace(' ', '_')
-    n = re.sub(r'[^a-z0-9_]', '', n)
-    n = n.strip('_') or tenant_id
+    n = normalize_tenant_id(tenant_id)
     headers = {
         "NGSILD-Tenant": n,
         "Fiware-Service": n,
