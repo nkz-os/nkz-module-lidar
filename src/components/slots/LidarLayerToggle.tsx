@@ -13,8 +13,6 @@ import { Mountain } from 'lucide-react';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 import { useTranslation } from '../../sdk';
 
-const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
-
 const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'height', icon: '\u{1F4CF}' },
   { value: 'ndvi', icon: '\u{1F33F}' },
@@ -64,7 +62,6 @@ const LidarLayerToggle: React.FC = () => {
   return (
     <LayerMenuRow
       moduleId="lidar"
-      accent={lidarAccent}
       icon={<Mountain className="w-4 h-4" />}
       title="LiDAR"
       enabled={layerVisible}
