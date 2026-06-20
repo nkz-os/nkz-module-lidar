@@ -35,7 +35,7 @@ spec:
             claimName: lidar-proj-cache-pvc
       containers:
         - name: api
-          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend@sha256:8382f1b237fc2ddb7046e204de57c33678a91ba0c5b4127237cb6cb8cf09247b
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend@sha256:6a71b1d397a7aea403bc392e180bd71de0756004f782a2db1e0627a7e8bc19ad
           imagePullPolicy: Always
           ports:
             - name: http
@@ -151,7 +151,7 @@ spec:
             claimName: lidar-proj-cache-pvc
       containers:
         - name: worker
-          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend@sha256:8382f1b237fc2ddb7046e204de57c33678a91ba0c5b4127237cb6cb8cf09247b
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend@sha256:6a71b1d397a7aea403bc392e180bd71de0756004f782a2db1e0627a7e8bc19ad
           imagePullPolicy: Always
           # Use app.worker so logging.basicConfig runs and pipeline logs (download, Phase A/B/C/D) are visible
           command:
