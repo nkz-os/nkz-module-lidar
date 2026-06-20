@@ -11,12 +11,15 @@ This module contains functions designed to be run by RQ workers,
 NOT within the API process.
 """
 
+from __future__ import annotations
+
 import logging
 import math
 import os
 import tempfile
 import shutil
 import json
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -28,15 +31,9 @@ import numpy as np
 import laspy
 import pdal
 import rasterio
-from rasterio.warp import transform_bounds
-from rasterio.features import shapes
-from shapely.geometry import shape, mapping
 from shapely.ops import transform as shapely_transform
 from shapely.wkt import loads as wkt_loads
 import pyproj
-from scipy import ndimage
-from skimage.feature import peak_local_max
-from skimage.segmentation import watershed
 import requests
 
 from app.config import settings
@@ -334,48 +331,48 @@ class LidarPipeline:
         logger.info(f"Phase B complete. Output: {self.colored_laz}")
     
     def _generate_dtm_dsm_chm(self, resolution: float = 0.5):
-        """Generate DTM, DSM, and CHM from the cropped+colored point cloud.
+        """Generate DTM, DSM, and CHM using geolibre-wasm + PDAL.
 
-        These derived products are always produced (regardless of tree-detection
-        config) so other modules can consume them via the export API without
-        needing to reprocess the source LAZ.
+        DTM/DSM: generated via PDAL writers.gdal (ground-classified / max return).
+        CHM: DSM - DTM using numpy if shapes match.
 
         Stores paths in self.dtm_path, self.dsm_path, self.chm_path.
         """
+        import geolibre_wasm as gl
         logger.info("Generating DTM/DSM/CHM")
         source_laz = self.colored_laz or self.cropped_laz
         self.dtm_path = os.path.join(self.work_dir, "dtm.tif")
         self.dsm_path = os.path.join(self.work_dir, "dsm.tif")
         self.chm_path = os.path.join(self.work_dir, "chm.tif")
 
-        # Compute full point cloud bounds so DTM and DSM share the same grid.
-        # PDAL writers.gdal derives raster extent from the points that reach it;
-        # DTM filters to ground-only (Classification==2) which may cover less
-        # area than the full cloud, producing a smaller raster.  Passing the
-        # same explicit bounds to both writers guarantees identical dimensions.
-        bounds_pipeline = pdal.Pipeline(json.dumps({
-            "pipeline": [
-                {"type": "readers.las", "filename": source_laz},
-            ]
-        }))
-        bounds_pipeline.execute()
-        bounds_meta = bounds_pipeline.metadata
-        if isinstance(bounds_meta, str):
-            bounds_meta = json.loads(bounds_meta)
-        # PDAL metadata: readers.las → minx/miny/maxx/maxy
-        las_meta = bounds_meta.get("metadata", {}).get("readers.las", {})
-        minx = las_meta.get("minx", 0)
-        miny = las_meta.get("miny", 0)
-        maxx = las_meta.get("maxx", 0)
-        maxy = las_meta.get("maxy", 0)
-        # Also capture Z range for frontend height colorization
-        self.z_min = las_meta.get("minz", None)
-        self.z_max = las_meta.get("maxz", None)
-        # PDAL bounds string: "([minx,maxx],[miny,maxy])"
+        # Compute point cloud bounds via geolibre's lidar_info
+        with open(source_laz, 'rb') as f:
+            laz_bytes = f.read()
+        info_result = gl.run_tool('lidar_info', args=[
+            '--input=/work/cloud.laz', '--output=/work/info.txt',
+        ], input={'cloud.laz': laz_bytes})
+        info_text = info_result.files.get('info.txt', b'').decode('utf-8', errors='replace')
+
+        # Parse bounds from lidar_info output
+        bounds_match = re.search(
+            r'(?:extent|bounds|x\s*range).*?([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)',
+            info_text, re.IGNORECASE
+        )
+        if bounds_match:
+            minx, miny, minz, maxx, maxy, maxz = map(float, bounds_match.groups())
+        else:
+            # Fallback: read with laspy (header-only, fast)
+            with laspy.open(source_laz) as reader:
+                hdr = reader.header
+                minx, miny, minz = hdr.mins
+                maxx, maxy, maxz = hdr.maxs
+
+        self.z_min = float(minz) if minz != -1e9 else None
+        self.z_max = float(maxz) if maxz != 1e9 else None
         bounds_str = f"([{minx},{maxx}],[{miny},{maxy}])"
         logger.info(f"DTM/DSM bounds from source: {bounds_str}")
 
-        # DTM: ground-classified points interpolated to raster
+        # DTM: ground-classified points interpolated via PDAL
         pdal.Pipeline(json.dumps({
             "pipeline": [
                 {"type": "readers.las", "filename": source_laz},
@@ -386,7 +383,7 @@ class LidarPipeline:
             ]
         })).execute()
 
-        # DSM: highest-return surface
+        # DSM: highest-return surface via PDAL
         pdal.Pipeline(json.dumps({
             "pipeline": [
                 {"type": "readers.las", "filename": source_laz},
@@ -396,7 +393,7 @@ class LidarPipeline:
             ]
         })).execute()
 
-        # CHM = DSM - DTM
+        # CHM = DSM - DTM using numpy
         with rasterio.open(self.dtm_path) as dtm_src, rasterio.open(self.dsm_path) as dsm_src:
             dtm = dtm_src.read(1)
             dsm = dsm_src.read(1)
@@ -416,6 +413,17 @@ class LidarPipeline:
             with rasterio.open(self.chm_path, 'w', **profile) as dst:
                 dst.write(chm, 1)
 
+        # Optional: smooth CHM using geolibre's dem_filter
+        # Uncomment when dem_filter output shape is verified to match input
+        # with open(self.chm_path, 'rb') as f:
+        #     chm_bytes = f.read()
+        # smooth_result = gl.run_tool('dem_filter', args=[
+        #     '--input=/work/chm.tif', '--output=/work/chm_smooth.tif',
+        #     '--filter=gaussian', '--sigma=1',
+        # ], input={'chm.tif': chm_bytes})
+        # with open(self.chm_path, 'wb') as f:
+        #     f.write(smooth_result.files['chm_smooth.tif'])
+
         logger.info("DTM/DSM/CHM generation complete")
 
     def phase_c_tree_segmentation(
@@ -424,102 +432,176 @@ class LidarPipeline:
         search_radius: float = 3.0,
         chm_resolution: float = 0.5
     ):
-        """
-        Phase C: Detect individual trees using CHM and watershed segmentation.
+        """Detect individual trees using geolibre's sink/depression tools.
 
-        Requires that _generate_dtm_dsm_chm() has already been called (the
-        CHM raster is reused from self.chm_path).
-
-        Steps:
-        1. Load pre-computed CHM
-        2. Find local maxima (tree tops)
-        3. Apply watershed segmentation
-        4. Extract tree statistics with canopy polygons
+        CHM is inverted so tree tops become "sinks" (local minima).
+        Geolibre's extract_sinks segments them. Falls back to scikit-image
+        watershed if geolibre fails.
 
         Args:
             min_height: Minimum tree height to detect (meters)
             search_radius: Search radius for local maxima (meters)
             chm_resolution: Resolution of CHM raster (meters)
         """
-        logger.info("Phase C: Tree segmentation")
+        import geolibre_wasm as gl
+        logger.info("Phase C: Tree segmentation (geolibre)")
 
         if not self.chm_path or not os.path.exists(self.chm_path):
-            raise RuntimeError("CHM not found — _generate_dtm_dsm_chm() must run before tree segmentation")
+            raise RuntimeError("CHM not found \u2014 _generate_dtm_dsm_chm() must run before tree segmentation")
 
-        # Load the pre-computed CHM
+        # 1. Load CHM and invert it
+        with rasterio.open(self.chm_path) as src:
+            chm = src.read(1)
+            profile = src.profile.copy()
+
+        chm_thresholded = np.where(chm >= min_height, chm, 0)
+        if np.max(chm_thresholded) == 0:
+            logger.info("No trees above min_height=%s detected", min_height)
+            self.detected_trees = []
+            return
+
+        chm_inverted = np.max(chm_thresholded) - chm_thresholded
+
+        # Write inverted CHM
+        inv_path = os.path.join(self.work_dir, "chm_inverted.tif")
+        profile.update(dtype=rasterio.float32, nodata=-9999)
+        with rasterio.open(inv_path, 'w', **profile) as dst:
+            dst.write(chm_inverted.astype(np.float32), 1)
+
+        # 2. Extract sinks (tree tops) using geolibre
+        with open(inv_path, 'rb') as f:
+            inv_bytes = f.read()
+
+        sink_result = gl.run_tool('extract_sinks', args=[
+            '--input=/work/chm_inv.tif', '--output=/work/sinks.tif',
+            '--vector_output=/work/sinks.geojson',
+            f'--min_size={int(search_radius * 2)}',
+        ], input={'chm_inv.tif': inv_bytes})
+
+        if sink_result.exit_code != 0:
+            logger.warning("geolibre extract_sinks failed: %s", sink_result.stdout)
+            return self._phase_c_fallback_watershed(min_height, search_radius, chm_resolution)
+
+        # 3. Parse sink polygons from GeoJSON
+        sinks_geojson = json.loads(sink_result.files['sinks.geojson'].decode('utf-8'))
+        self.detected_trees = []
+
+        # Persist sink raster for pixel-level access
+        sink_tif = sink_result.files['sinks.tif']
+        sink_path = os.path.join(self.work_dir, "sinks.tif")
+        with open(sink_path, 'wb') as f:
+            f.write(sink_tif)
+
+        with rasterio.open(sink_path) as sink_src:
+            sink_raster = sink_src.read(1)
+            sink_transform = sink_src.transform
+
+        # 4. Extract tree properties from each sink
+        for feature in sinks_geojson.get('features', []):
+            props = feature.get('properties', {})
+            tree_id = props.get('id', props.get('FID', len(self.detected_trees)))
+            geom = feature.get('geometry', {})
+
+            if geom.get('type') == 'Point':
+                coords = geom['coordinates']
+                # Convert world coords to pixel coords
+                col, row = ~sink_transform * (coords[0], coords[1])
+                row, col = int(round(row)), int(round(col))
+                if 0 <= row < sink_raster.shape[0] and 0 <= col < sink_raster.shape[1]:
+                    inv_val = sink_raster[row, col]
+                    height = float(np.max(chm_thresholded) - inv_val) if inv_val > 0 else 0
+                else:
+                    height = 0
+                lon, lat = coords[0], coords[1]
+                canopy_geom = None
+            else:
+                height = props.get('depth', props.get('mean_depth', 0))
+                lon, lat = 0, 0
+                canopy_geom = geom if geom.get('type') == 'Polygon' else None
+
+            # Crown area from properties
+            crown_area = props.get('area', 0)
+            crown_diameter = np.sqrt(crown_area / np.pi) * 2 if crown_area > 0 else 0
+
+            tree = {
+                "id": f"tree_{tree_id}",
+                "location": {
+                    "type": "Point",
+                    "coordinates": [round(lon, 7), round(lat, 7)],
+                },
+                "height": round(float(height), 2) if height else 0,
+                "crown_diameter": round(float(crown_diameter), 2),
+                "crown_area": round(float(crown_area), 2),
+                "canopy_geometry": canopy_geom,
+            }
+            self.detected_trees.append(tree)
+
+        logger.info(f"Phase C complete (geolibre). Detected {len(self.detected_trees)} trees")
+
+    def _phase_c_fallback_watershed(
+        self,
+        min_height: float = 2.0,
+        search_radius: float = 3.0,
+        chm_resolution: float = 0.5
+    ):
+        """Fallback: use scikit-image watershed if geolibre fails."""
+        from scipy.ndimage import gaussian_filter
+        from skimage.feature import peak_local_max
+        from skimage.segmentation import watershed
+        from rasterio.features import shapes
+        from shapely.geometry import shape, mapping
+
+        logger.info("Phase C fallback: watershed segmentation (scikit-image)")
+
         with rasterio.open(self.chm_path) as chm_src:
             chm = chm_src.read(1)
             transform = chm_src.transform
             crs = chm_src.crs
 
-        # Apply minimum height threshold
         chm_masked = np.where(chm >= min_height, chm, 0)
-        
-        # Smooth CHM slightly to reduce noise
-        chm_smooth = ndimage.gaussian_filter(chm_masked, sigma=1)
-        
-        # Find local maxima
+        chm_smooth = gaussian_filter(chm_masked, sigma=1)
         min_distance = int(search_radius / chm_resolution)
         coordinates = peak_local_max(
             chm_smooth,
             min_distance=min_distance,
             threshold_abs=min_height
         )
-        
-        logger.info(f"Found {len(coordinates)} potential tree tops")
-        
-        # Step 5: Watershed segmentation (optional, for crown delineation)
-        # Create markers for watershed
+
+        logger.info(f"Fallback: found {len(coordinates)} potential tree tops")
+
         markers = np.zeros(chm.shape, dtype=np.int32)
         for idx, (row, col) in enumerate(coordinates, start=1):
             markers[row, col] = idx
-        
-        # Run watershed
+
         labels = watershed(-chm_smooth, markers, mask=chm_smooth > 0)
-        
-        # Step 6: Extract tree properties with canopy polygons
+
         self.detected_trees = []
-
-        # Setup coordinate transformation if needed (raster CRS to WGS84)
-        raster_crs = crs
         target_crs = pyproj.CRS("EPSG:4326")
-
-        # Create transformer if CRS is not already WGS84
         transformer = None
-        if raster_crs and raster_crs != target_crs:
+        if crs and crs != target_crs:
             try:
                 transformer = pyproj.Transformer.from_crs(
-                    raster_crs, target_crs, always_xy=True
+                    crs, target_crs, always_xy=True
                 )
             except Exception as e:
                 logger.warning(f"Could not create CRS transformer: {e}")
 
-        # Vectorize watershed labels to get canopy polygons
-        logger.info("Extracting canopy polygons from watershed...")
         canopy_polygons = {}
-
         try:
-            # Use rasterio.features.shapes to vectorize the labels
             for geom, value in shapes(labels.astype(np.int32), transform=transform):
-                if value > 0:  # Skip background (0)
+                if value > 0:
                     canopy_polygons[int(value)] = shape(geom)
         except Exception as e:
             logger.warning(f"Could not vectorize canopy polygons: {e}")
 
         for idx, (row, col) in enumerate(coordinates, start=1):
-            # Get pixel coordinates in raster CRS
             px_x = transform.c + col * transform.a
             px_y = transform.f + row * transform.e
-
-            # Get tree height at peak
             height = float(chm[row, col])
-
-            # Get crown area (count pixels with this label)
             crown_pixels = np.sum(labels == idx)
-            crown_area = crown_pixels * (chm_resolution ** 2)  # m²
-            crown_diameter = np.sqrt(crown_area / np.pi) * 2  # Approximate diameter
+            crown_area = crown_pixels * (chm_resolution ** 2)
+            crown_diameter = np.sqrt(crown_area / np.pi) * 2
 
-            # Transform coordinates to WGS84 if transformer available
             lon, lat = px_x, px_y
             if transformer:
                 try:
@@ -531,21 +613,16 @@ class LidarPipeline:
                 "id": f"tree_{idx}",
                 "location": {
                     "type": "Point",
-                    "coordinates": [round(lon, 7), round(lat, 7)]
+                    "coordinates": [round(lon, 7), round(lat, 7)],
                 },
                 "height": round(height, 2),
                 "crown_diameter": round(crown_diameter, 2),
-                "crown_area": round(crown_area, 2)
+                "crown_area": round(crown_area, 2),
             }
 
-            # Add canopy polygon if available
             if idx in canopy_polygons:
                 canopy_geom = canopy_polygons[idx]
-
-                # Simplify polygon slightly to reduce size (tolerance ~10cm)
                 canopy_geom = canopy_geom.simplify(0.1, preserve_topology=True)
-
-                # Transform to WGS84 if needed
                 if transformer:
                     try:
                         canopy_geom = shapely_transform(
@@ -554,19 +631,16 @@ class LidarPipeline:
                         )
                     except Exception as e:
                         logger.debug(f"Could not transform canopy polygon: {e}")
-
-                # Only include if polygon is valid
                 if canopy_geom.is_valid and not canopy_geom.is_empty:
-                    # Round coordinates to 7 decimal places
                     canopy_coords = mapping(canopy_geom)
                     tree["canopy_geometry"] = {
                         "type": canopy_coords["type"],
-                        "coordinates": canopy_coords["coordinates"]
+                        "coordinates": canopy_coords["coordinates"],
                     }
 
             self.detected_trees.append(tree)
 
-        logger.info(f"Phase C complete. Detected {len(self.detected_trees)} trees with canopy polygons")
+        logger.info(f"Fallback complete. Detected {len(self.detected_trees)} trees")
     
     def phase_d_tiling(self):
         """

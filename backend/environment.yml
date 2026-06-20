@@ -20,8 +20,9 @@ dependencies:
   - geopandas=0.14
 
   # Image processing for tree segmentation
-  - scikit-image=0.22
-  - scipy=1.11
+  # TODO: Remove once DTM/DSM/CHM + tree segmentation migration to geolibre is complete
+  # - scikit-image=0.22
+  # - scipy=1.11
 
   # NumPy (pinned for compatibility)
   - numpy=1.24
