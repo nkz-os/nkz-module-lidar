@@ -222,7 +222,16 @@ class LidarPipeline:
         # for parcels in the same area (big win for overlapping requests)
         if laz_url.startswith(('http://', 'https://')):
             logger.info(f"Getting tile from cache or downloading: {laz_url}")
-            self.input_laz = tile_cache.get_or_download_tile(laz_url, self.work_dir)
+            # Try PNOADownloader first (multi-strategy download)
+            from app.services.pnoa_downloader import get_pnoa_downloader
+            tile_name = os.path.basename(laz_url).replace('.laz', '') if laz_url else ''
+            pnoa_result = get_pnoa_downloader().download(laz_url, self.work_dir, tile_name)
+            if pnoa_result:
+                self.input_laz = pnoa_result
+            else:
+                # Fallback to standard tile cache
+                logger.info(f"PNOA downloader failed, trying tile cache: {laz_url}")
+                self.input_laz = tile_cache.get_or_download_tile(laz_url, self.work_dir)
             logger.info(f"Tile ready at: {self.input_laz}")
         else:
             # Local file - just copy (user uploads)
