@@ -305,6 +305,46 @@ class StorageService:
         response = self.client.get_object(Bucket=self.bucket, Key=key)
         return response["Body"]
 
+    def get_file_bytes(self, key: str) -> bytes:
+        """Get a file from the default bucket as raw bytes.
+
+        Args:
+            key: Object key in the bucket
+
+        Returns:
+            File contents as bytes
+
+        Raises:
+            ClientError: If the file does not exist
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
+
+    def upload_bytes(
+        self,
+        key: str,
+        data: bytes,
+        content_type: str = "application/octet-stream"
+    ) -> str:
+        """Upload raw bytes to the default bucket.
+
+        Args:
+            key: S3 key (path in bucket)
+            data: Raw bytes to upload
+            content_type: MIME type of the data
+
+        Returns:
+            Public URL to the object
+        """
+        from io import BytesIO
+        self.client.upload_fileobj(
+            BytesIO(data),
+            self.bucket,
+            key,
+            ExtraArgs={"ContentType": content_type},
+        )
+        return self.get_public_url(key)
+
     def file_exists_in_bucket(self, bucket: str, key: str) -> bool:
         """Check if a file exists in a specific bucket."""
         try:

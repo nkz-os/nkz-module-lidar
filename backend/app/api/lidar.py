@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from redis import Redis
 from rq import Queue
@@ -804,6 +804,54 @@ async def export_derived_product(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
+# ============================================================================
+# MDS Terrain Tile Endpoints (DSM → Cesium Quantized Mesh)
+# ============================================================================
+
+
+@router.get("/terrain/{layer_id}/layer.json")
+async def get_mds_layer_json(
+    layer_id: str,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Serve Cesium layer.json for a LiDAR DSM terrain tileset."""
+    from app.services.terrain_service import get_layer_json
+
+    meta = get_layer_json(layer_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="No MDS tileset for this layer")
+
+    return JSONResponse(content=meta, media_type="application/json")
+
+
+@router.get("/terrain/{layer_id}/{z}/{x}/{y}.terrain")
+async def get_mds_terrain_tile(
+    layer_id: str,
+    z: int,
+    x: int,
+    y: int,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Serve a single DSM quantized mesh terrain tile."""
+    from app.services.terrain_service import get_terrain_tile
+
+    tile_data = get_terrain_tile(layer_id, z, x, y)
+    if tile_data is None:
+        return Response(status_code=204)
+
+    import gzip
+    return Response(
+        content=gzip.decompress(tile_data),
+        media_type="application/vnd.quantized-mesh",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400, immutable",
         },
     )
 

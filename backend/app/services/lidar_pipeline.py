@@ -174,7 +174,11 @@ class LidarPipeline:
             # Phase D: 3D Tiling
             self.update_job_status("processing", 70, "Converting to 3D Tiles...")
             self.phase_d_tiling()
-            
+
+            # Phase E: MDS terrain tiles (DSM → Cesium Quantized Mesh)
+            self.update_job_status("processing", 80, "Generating MDS terrain tiles...")
+            self.phase_e_generate_mds_tiles()
+
             # Upload results to MinIO
             self.update_job_status("processing", 90, "Uploading results...")
             upload_urls = self._upload_results()
@@ -735,7 +739,56 @@ class LidarPipeline:
         self._fix_tileset_bounding_volumes(tileset_path)
 
         logger.info(f"Phase D complete. Tiles at: {self.output_tiles_dir}")
-    
+
+    def phase_e_generate_mds_tiles(self):
+        """Generate MDS terrain tiles from DSM using geolibre.
+
+        Converts the DSM GeoTIFF to Cesium Quantized Mesh tiles
+        stored in MinIO under terrain/lidar/{job_id}/.
+        """
+        if not self.dsm_path or not os.path.exists(self.dsm_path):
+            logger.warning("No DSM available for MDS terrain generation")
+            return
+
+        try:
+            import geolibre_wasm as gl
+        except ImportError:
+            logger.warning("geolibre-wasm not available — skipping MDS terrain generation")
+            return
+
+        layer_id = self.job_id
+        tiles_prefix = f"terrain/lidar/{layer_id}"
+
+        try:
+            with open(self.dsm_path, 'rb') as f:
+                dsm_data = f.read()
+
+            result = gl.run_tool(
+                'write_terrain_tiles',
+                args=[
+                    '--input=/work/dsm.tif',
+                    '--output=/work/tiles/',
+                    '--format=quantized-mesh',
+                    '--max-zoom=14',
+                    '--min-zoom=8',
+                ],
+                input={'dsm.tif': dsm_data},
+            )
+
+            if result.exit_code != 0:
+                logger.error(f"MDS terrain generation failed: {result.stderr}")
+                return
+
+            # Upload tiles to MinIO
+            for fname, fdata in result.files.items():
+                if fname.startswith("tiles/"):
+                    key = f"{tiles_prefix}/{fname[6:]}"
+                    storage_service.upload_bytes(key, fdata)
+
+            logger.info(f"MDS terrain tiles generated for layer {layer_id} ({len(result.files)} files)")
+        except Exception as e:
+            logger.error(f"MDS terrain generation error: {e}", exc_info=True)
+
     def _fix_tileset_bounding_volumes(self, tileset_path: str) -> None:
         """
         Post-process tileset.json to fix py3dtiles bounding volume bug.
