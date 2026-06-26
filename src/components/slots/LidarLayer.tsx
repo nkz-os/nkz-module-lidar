@@ -11,7 +11,6 @@
  */
 
 import React, { useContext, useEffect, useRef, useCallback, useState } from 'react';
-import { useTheme } from '@nekazari/design-tokens';
 import { Spinner } from '@nekazari/ui-kit';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
 
@@ -117,8 +116,6 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
   const tilesetRefs = useRef<CesiumTilesetType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // useTheme kept for parity with original — may be used by future styling extensions
-  void useTheme();
 
   // Get viewer from host context as fallback (host SlotRenderer doesn't pass viewer prop)
   const contextViewer = useCesiumViewer();
