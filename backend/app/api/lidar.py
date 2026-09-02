@@ -140,6 +140,7 @@ class LayerResponse(BaseModel):
     z_min: Optional[float] = None
     z_max: Optional[float] = None
     vertical_reference: Optional[str] = None
+    attribution: Optional[str] = None
 
 
 # ============================================================================
@@ -353,6 +354,7 @@ async def get_layers(
             z_min=_prop(l, "zMin"),
             z_max=_prop(l, "zMax"),
             vertical_reference=_prop(l, "verticalReference"),
+            attribution=_prop(l, "attribution"),
         )
         for l in layers
     ]
@@ -383,6 +385,7 @@ async def get_layer(
         z_min=_prop(layer, "zMin"),
         z_max=_prop(layer, "zMax"),
         vertical_reference=_prop(layer, "verticalReference"),
+        attribution=_prop(layer, "attribution"),
     )
 
 

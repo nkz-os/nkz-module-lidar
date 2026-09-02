@@ -685,6 +685,11 @@ const LidarLayerControl: React.FC = () => {
                         </IconButton>
                       </div>
                     </div>
+                    {layer.attribution && (
+                      <p className="text-nkz-xs text-nkz-text-muted mt-nkz-tight px-nkz-inline">
+                        {layer.attribution}
+                      </p>
+                    )}
                     {/* Delete confirmation */}
                     {confirmDeleteId === layer.id && (
                       <div className="mt-nkz-tight p-nkz-inline bg-nkz-danger-soft rounded-nkz-md border border-nkz-danger">

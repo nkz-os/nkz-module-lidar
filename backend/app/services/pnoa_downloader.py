@@ -1,135 +1,211 @@
-"""PNOA LiDAR Downloader — tries multiple strategies to download LAZ files.
+"""PNOA LiDAR Downloader — downloads LAZ tiles from the CNIG Download Centre.
 
-The IGN/CNIG does not guarantee a single direct URL pattern for LAZ files.
-This downloader tries multiple approaches and falls back gracefully.
+The IGN/CNIG distributes PNOA LiDAR (2ª/3ª cobertura) through the Centro de
+Descargas (https://centrodedescargas.cnig.es), a session-based web app whose
+download is nevertheless DIRECT (no registration). The flow, reverse-engineered
+and verified live (2026-09-02):
+
+1. GET any page (e.g. ``detalleArchivo`` or a series page) to obtain the
+   ``JSESSIONID`` cookie.
+2. POST ``archivosSerie`` with ``codSerie`` + ``coordenadas`` (a GeoJSON
+   FeatureCollection with a Point at the parcel centroid) → HTML fragment with
+   the matching tile(s): ``data-sec="<id>"`` + the LAZ filename.
+3. POST ``initDescargaDir`` with ``secuencial=<sec>`` → JSON
+   ``{"secuencialDescDir": "<token>", ...}``.  (POST only — GET is 403.)
+4. POST ``descargaDir`` with ``secDescDirLA=<token>`` → the LAZ file
+   (``Content-Disposition: attachment; filename=PNOA_...LAZ``, magic ``LASF``).
+
+The old ``datos.ign.es/lidar/{lat}_{lon}/lidar.laz`` pattern is INVENTED and
+that host is broken (wrong TLS cert + connection resets) — do not use it.
+
+License: PNOA LiDAR data requires attribution (Orden FOM/2807/2015, CC-BY 4.0).
+Derived products use: "Obra derivada de LiDAR-PNOA-cob3 2022-2025 CC-BY 4.0
+scne.es". The pipeline persists this on the DigitalAsset entity.
 """
 
+from __future__ import annotations
+
+import io
+import json
 import logging
 import os
-import tempfile
-from typing import Optional
+import re
+from typing import List, Optional, Tuple
+
 import requests
 
 logger = logging.getLogger(__name__)
 
-# Known IGN/CNIG download patterns (tried in order)
-DOWNLOAD_STRATEGIES = []
+BASE_URL = "https://centrodedescargas.cnig.es/CentroDescargas"
+
+# (codSerie, coverage_label, attribution) — try newest first, fall back to the
+# national 2ª cobertura when the 3ª (still being published by region) has no
+# coverage for the parcel.
+SERIES = [
+    ("LIDA3", "cob3", "Obra derivada de LiDAR-PNOA-cob3 2022-2025 CC-BY 4.0 scne.es"),
+    ("LIDA2", "cob2", "Obra derivada de LiDAR-PNOA-cob2 2015-2021 CC-BY 4.0 scne.es"),
+]
+
+_DATA_SEC_RE = re.compile(r'data-sec="(\d+)"')
+_LAZ_NAME_RE = re.compile(r'(PNOA[^"<>\s]+\.LAZ)')
+
+# Search the centroid plus the 4 corners of the bbox so a parcel straddling a
+# 1×1 km tile boundary still yields all its tiles.
+_SEARCH_OFFSETS = [(0.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 0.0), (-1.0, 0.0)]
 
 
 class PNOADownloader:
-    """Download LAZ files from IGN/CNIG PNOA LiDAR distribution.
-    
-    Tries multiple strategies in order:
-    1. Direct URL (from PNOAIndexer tile metadata)
-    2. CNIG Download Centre API (session-based)
-    3. INSPIRE WCS (for MDT fallback if LAZ unavailable)
-    
-    All failures are logged and return None — the pipeline handles
-    the fallback to user upload.
-    """
-    
+    """Download PNOA LiDAR LAZ tiles via the CNIG Centro de Descargas."""
+
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Nekazari/2.0 (LiDAR module; research project)',
+            "User-Agent": "Nekazari/2.0 (LiDAR module; research project)",
         })
-    
-    def download(self, laz_url: str, output_dir: str, tile_name: str = '') -> Optional[str]:
-        """Try to download a LAZ file using multiple strategies.
-        
-        Args:
-            laz_url: Best-effort URL from PNOAIndexer tile metadata
-            output_dir: Directory to save the downloaded file
-            tile_name: Tile identifier for logging
-            
-        Returns:
-            Path to downloaded LAZ file, or None if all strategies failed
+        self._session_ready = False
+        self.last_attribution: Optional[str] = None
+
+    # ── public ────────────────────────────────────────────────────────────
+    def download(self, geometry_wkt: str, output_dir: str) -> Optional[str]:
+        """Download the LAZ tile(s) covering ``geometry_wkt``.
+
+        Returns the path of the downloaded LAZ, or None if no coverage /
+        all strategies failed.  When a parcel spans multiple 1×1 km tiles the
+        first tile is returned (multi-tile merge is out of scope for now).
         """
-        # Strategy 1: Direct URL
-        logger.info(f"[PNOA] Trying direct URL: {laz_url}")
-        result = self._try_direct_url(laz_url, output_dir, tile_name)
-        if result:
-            return result
-        
-        # Strategy 2: CNIG Download Centre via resource ID
-        # (extracted from tile_name or laz_url)
-        resource_id = tile_name.replace('PNOA_', '').replace('+', '').replace('_', '/')
-        cnig_url = self._build_cnig_url(resource_id)
-        if cnig_url:
-            logger.info(f"[PNOA] Trying CNIG download: {cnig_url}")
-            result = self._try_direct_url(cnig_url, output_dir, tile_name)
-            if result:
-                return result
-        
-        # Strategy 3: Try common CNIG download patterns
-        for strategy in self._generate_candidates(tile_name, laz_url):
-            logger.info(f"[PNOA] Trying alternative: {strategy}")
-            result = self._try_direct_url(strategy, output_dir, tile_name)
-            if result:
-                return result
-        
-        logger.warning(f"[PNOA] All download strategies failed for {tile_name or laz_url}")
-        return None
-    
-    def _try_direct_url(self, url: str, output_dir: str, tile_name: str = '') -> Optional[str]:
-        """Try to download from a direct URL."""
-        try:
-            resp = self.session.get(url, timeout=30, stream=True)
-            if resp.status_code != 200:
-                logger.debug(f"[PNOA] URL returned {resp.status_code}: {url}")
-                return None
-            
-            # Check it's actually a LAZ file (or can be)
-            content_type = resp.headers.get('Content-Type', '')
-            if 'text/html' in content_type and len(resp.content) < 1024:
-                logger.debug(f"[PNOA] URL returned HTML (not LAZ): {url}")
-                return None
-            
-            # Save to temp file
-            ext = '.laz'
-            local_path = os.path.join(output_dir, f"{tile_name or 'pnoa_download'}{ext}")
-            with open(local_path, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            file_size = os.path.getsize(local_path)
-            logger.info(f"[PNOA] Downloaded {file_size} bytes -> {local_path}")
-            return local_path
-            
-        except requests.RequestException as e:
-            logger.debug(f"[PNOA] Download failed for {url}: {e}")
+        self._ensure_session()
+
+        lon, lat = self._centroid_lonlat(geometry_wkt)
+        if lon is None:
+            logger.warning("[PNOA] cannot derive centroid from geometry")
             return None
-    
-    def _build_cnig_url(self, resource_id: str) -> Optional[str]:
-        """Build a CNIG Download Centre URL from a resource identifier."""
-        # CNIG download URLs follow this pattern:
-        # https://centrodedescargas.cnig.es/CentroDescargas/descargarFicheros.do?fichero=<id>
-        # But resource IDs are not predictable from geographic coordinates alone.
-        return None  # Requires a pre-built mapping of tile → resource ID
-    
-    def _generate_candidates(self, tile_name: str, laz_url: str) -> list:
-        """Generate alternative URL candidates for a tile."""
-        candidates = []
-        
-        # Try CNIG CDN patterns
-        if tile_name:
-            # Pattern: https://centrodedescargas.cnig.es/CentroDescargas/...
-            parts = tile_name.replace('PNOA_', '').split('_')
-            if len(parts) >= 2:
-                lat, lon = parts[0], parts[1]
-                # Remove sign for CNIG format
-                lat_clean = lat.replace('+', '').replace('-', '')
-                lon_clean = lon.replace('+', '').replace('-', '')
-                candidates.append(
-                    f"https://centrodedescargas.cnig.es/CentroDescargas/"
-                    f"descargarLIDAR.do?idHoja={lat_clean}_{lon_clean}"
-                )
-        
-        return candidates
+
+        for cod_serie, cov, attribution in SERIES:
+            tiles = self._search_tiles(lon, lat, cod_serie)
+            if not tiles:
+                logger.info("[PNOA] no %s coverage at (%.5f, %.5f)", cov, lon, lat)
+                continue
+            logger.info("[PNOA] %s tiles: %s", cov, tiles)
+            for sec, filename in tiles:
+                path = self._download_sec(sec, filename, output_dir)
+                if path:
+                    self.last_attribution = attribution
+                    return path
+            logger.warning("[PNOA] %s tiles found but none downloaded", cov)
+        return None
+
+    # ── session ───────────────────────────────────────────────────────────
+    def _ensure_session(self) -> None:
+        if self._session_ready:
+            return
+        try:
+            # Any page sets the JSESSIONID cookie.
+            self.session.get(f"{BASE_URL}/lidar-tercera-cobertura", timeout=20)
+            if "JSESSIONID" in self.session.cookies:
+                self._session_ready = True
+        except requests.RequestException as exc:
+            logger.warning("[PNOA] session setup failed: %s", exc)
+
+    # ── geometry ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _centroid_lonlat(geometry_wkt: str) -> Tuple[Optional[float], Optional[float]]:
+        if not geometry_wkt:
+            return None, None
+        try:
+            from shapely import wkt as shapely_wkt
+            geom = shapely_wkt.loads(geometry_wkt)
+            c = geom.centroid
+            return c.x, c.y
+        except Exception as exc:
+            logger.warning("[PNOA] WKT parse failed: %s", exc)
+            return None, None
+
+    # ── search ────────────────────────────────────────────────────────────
+    def _search_tiles(self, lon: float, lat: float, cod_serie: str) -> List[Tuple[str, str]]:
+        """Find (sec, filename) tiles covering a point via the CNIG search."""
+        geojson = json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            }],
+        })
+        found: dict = {}
+        try:
+            resp = self.session.post(
+                f"{BASE_URL}/archivosSerie",
+                data={
+                    "numPagina": "1",
+                    "codSerie": cod_serie,
+                    "coordenadas": geojson,
+                    "todaEspania": "N",
+                    "todoMundo": "N",
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning("[PNOA] search %s -> %s", cod_serie, resp.status_code)
+                return []
+            html = resp.text
+            secs = _DATA_SEC_RE.findall(html)
+            names = _LAZ_NAME_RE.findall(html)
+            for sec in secs:
+                found[sec] = names[0] if names else f"pnoa-{sec}"
+        except requests.RequestException as exc:
+            logger.warning("[PNOA] search %s failed: %s", cod_serie, exc)
+        return list(found.items())
+
+    # ── download ──────────────────────────────────────────────────────────
+    def _download_sec(self, sec: str, filename: str, output_dir: str) -> Optional[str]:
+        """Download one tile by its internal ``sec`` id (2-step POST)."""
+        try:
+            # 1. resolve download token
+            resp = self.session.post(
+                f"{BASE_URL}/initDescargaDir",
+                data={"secuencial": sec},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            token = resp.json().get("secuencialDescDir") or sec
+
+            # 2. fetch the file
+            resp2 = self.session.post(
+                f"{BASE_URL}/descargaDir",
+                data={"secDescDirLA": token},
+                timeout=300,
+                stream=True,
+            )
+            if resp2.status_code != 200:
+                logger.warning("[PNOA] descargaDir %s -> %s", sec, resp2.status_code)
+                return None
+            if "attachment" not in resp2.headers.get("Content-Disposition", ""):
+                # HTML error page / license wall, not a LAZ
+                head = resp2.content[:512] if not getattr(resp2, "_consumed", False) else b""
+                if head and b"<html" in head.lower():
+                    logger.warning("[PNOA] descargaDir returned HTML for %s", sec)
+                    return None
+
+            safe_name = filename or f"pnoa_{sec}.laz"
+            if not safe_name.lower().endswith(".laz"):
+                safe_name += ".laz"
+            local_path = os.path.join(output_dir, safe_name)
+            with open(local_path, "wb") as f:
+                for chunk in resp2.iter_content(chunk_size=1 << 20):
+                    if chunk:
+                        f.write(chunk)
+            size = os.path.getsize(local_path)
+            if size < 100:  # too small to be a LAZ
+                os.remove(local_path)
+                return None
+            logger.info("[PNOA] downloaded %s (%d bytes)", local_path, size)
+            return local_path
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("[PNOA] download %s failed: %s", sec, exc)
+            return None
 
 
 # Singleton
-_downloader_instance = None
+_downloader_instance: Optional[PNOADownloader] = None
 
 
 def get_pnoa_downloader() -> PNOADownloader:

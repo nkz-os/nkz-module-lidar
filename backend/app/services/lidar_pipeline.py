@@ -226,10 +226,9 @@ class LidarPipeline:
         # for parcels in the same area (big win for overlapping requests)
         if laz_url.startswith(('http://', 'https://')):
             logger.info(f"Getting tile from cache or downloading: {laz_url}")
-            # Try PNOADownloader first (multi-strategy download)
+            # Try PNOADownloader first (CNIG search + 2-step download)
             from app.services.pnoa_downloader import get_pnoa_downloader
-            tile_name = os.path.basename(laz_url).replace('.laz', '') if laz_url else ''
-            pnoa_result = get_pnoa_downloader().download(laz_url, self.work_dir, tile_name)
+            pnoa_result = get_pnoa_downloader().download(geometry_wkt or "", self.work_dir)
             if pnoa_result:
                 self.input_laz = pnoa_result
             else:
@@ -1060,6 +1059,12 @@ class LidarPipeline:
         """
         client = get_orion_client(self.tenant_id)
         asset_id = self.job_id.split(":")[-1]
+        # PNOA data requires attribution (Orden FOM/2807/2015, CC-BY 4.0).
+        # The downloader records the exact formula for the series it used.
+        attribution = None
+        if config.get("source") == "PNOA":
+            from app.services.pnoa_downloader import get_pnoa_downloader
+            attribution = getattr(get_pnoa_downloader(), "last_attribution", None)
         client.create_digital_asset_sync(
             asset_id=asset_id,
             parcel_id=self.parcel_id,
@@ -1075,6 +1080,7 @@ class LidarPipeline:
             z_max=self.z_max,
             vertical_reference=self.vertical_reference,
             geoid_shift_m=self.geoid_shift_m,
+            attribution=attribution,
         )
         self.update_job_status(
             "completed",

@@ -66,6 +66,8 @@ export interface Layer {
      * ("declared" | "compound:EPSG:5782" | null). Layers with a value
      * render correctly at heightOffset 0. */
     vertical_reference?: string | null;
+    /** Required attribution/license for the source data (e.g. PNOA). */
+    attribution?: string | null;
 }
 
 export interface DetectedTree {
