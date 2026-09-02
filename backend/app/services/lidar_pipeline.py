@@ -936,7 +936,11 @@ class LidarPipeline:
         Returns a dict mapping product keys to public URLs so the caller
         can attach them to the Orion-LD DigitalAsset entity.
         """
-        prefix = str(self.job_id)
+        # Derived products share the DigitalAsset's short id as the key
+        # prefix, matching the entity id (urn:ngsi-ld:DigitalAsset:<short id>)
+        # and the export API (GET /export/{layer_id}/{product}).  Historically
+        # the FULL job URN was used here, which no consumer could resolve.
+        prefix = str(self.job_id).split(":")[-1]
 
         # 3D Tiles (directory)
         tileset_url = storage_service.upload_directory(
