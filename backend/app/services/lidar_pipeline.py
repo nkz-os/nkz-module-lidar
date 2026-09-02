@@ -39,6 +39,7 @@ import requests
 from app.config import settings
 from app.services.geobounds_validator import GeoBoundsValidator
 from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs, reproject_to_ecef
+from app.services.lidar_info import parse_bounds
 from app.services.orion_client import get_orion_client
 from app.services.pnoa_indexer import PNOAIndexer
 from app.services.storage import storage_service
@@ -368,13 +369,10 @@ class LidarPipeline:
         ], input={'cloud.laz': laz_bytes})
         info_text = info_result.files.get('info.txt', b'').decode('utf-8', errors='replace')
 
-        # Parse bounds from lidar_info output
-        bounds_match = re.search(
-            r'(?:extent|bounds|x\s*range).*?([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)\s*,?\s*([\d\.\-]+)',
-            info_text, re.IGNORECASE
-        )
-        if bounds_match:
-            minx, miny, minz, maxx, maxy, maxz = map(float, bounds_match.groups())
+        # Parse bounds from lidar_info output (structured x/y/z range lines)
+        bounds = parse_bounds(info_text)
+        if bounds:
+            minx, miny, minz, maxx, maxy, maxz = bounds
         else:
             # Fallback: read with laspy (header-only, fast)
             with laspy.open(source_laz) as reader:
