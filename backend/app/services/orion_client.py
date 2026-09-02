@@ -48,6 +48,16 @@ class OrionLDClient:
         if settings.ORION_CONTEXT_URL:
             link_val = f'<{settings.ORION_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
             self.headers["Link"] = link_val
+            # Also use the in-cluster platform context in request bodies.
+            # The class default lists smartdatamodels.org, which Orion-LD must
+            # resolve REMOTELY — the Orion pod has no internet egress, so once
+            # its context cache expires every entity POST 504s with
+            # LdContextNotAvailable. The gateway-served platform context is
+            # in-cluster and defines the same SDM terms (plus DigitalAsset).
+            self.CONTEXT = [
+                "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld",
+                settings.ORION_CONTEXT_URL,
+            ]
 
     async def _request(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None) -> Any:
         """Async HTTP request to Orion-LD (used by API handlers)."""
