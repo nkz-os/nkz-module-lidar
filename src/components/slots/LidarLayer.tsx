@@ -13,6 +13,7 @@
 import React, { useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { Spinner } from '@nekazari/ui-kit';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
+import { lidarStore } from '../../services/lidarStore';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Cesium types are loaded globally by the host at runtime.
@@ -108,6 +109,8 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
     activeTilesetUrl,
     colorMode,
     heightOffset,
+    setHeightOffset,
+    autoFitToken,
     layerVisible,
     layerScope,
     layers,
@@ -312,6 +315,83 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
       }
     });
   }, [heightOffset]);
+
+  /**
+   * Auto-fit: align the cloud's ground with the Cesium terrain provider.
+   *
+   * Samples the active terrain (injected by eu-elevation) under the cloud
+   * footprint and sets heightOffset = terrain_min − cloud_ground_ref, so
+   * clouds with missing/mis-declared vertical datums (drone flights, legacy
+   * layers) sit on the rendered terrain without manual slider hunting.
+   */
+  const lastAutoFitRef = useRef(0);
+  useEffect(() => {
+    if (!autoFitToken || autoFitToken === lastAutoFitRef.current) return;
+    lastAutoFitRef.current = autoFitToken;
+
+    const Cesium = (window as any).Cesium;
+    if (!Cesium || !viewer) {
+      lidarStore.setAutoFitStatus({ state: 'error', message: 'autoFitNoTerrain' });
+      return;
+    }
+    const tileset = tilesetRefs.current.find(
+      (ts) => !ts.isDestroyed?.() && ts.boundingSphere
+    );
+    if (!tileset) {
+      lidarStore.setAutoFitStatus({ state: 'error', message: 'autoFitNoLayer' });
+      return;
+    }
+    const provider = viewer.terrainProvider ?? viewer.scene?.terrainProvider;
+    if (!provider || provider instanceof Cesium.EllipsoidTerrainProvider) {
+      lidarStore.setAutoFitStatus({ state: 'error', message: 'autoFitNoTerrain' });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // boundingSphere.center is the PRE-offset world center (the offset
+        // effect above adds heightOffset on top of it), and z_min metadata
+        // is in the same native datum — so the math below is offset-agnostic.
+        const carto = Cesium.Cartographic.fromCartesian(tileset.boundingSphere.center);
+        const halfSpreadM = Math.min(tileset.boundingSphere.radius * 0.6, 1000);
+        const dLat = halfSpreadM / 6378137;
+        const dLon = dLat / Math.max(0.2, Math.cos(carto.latitude));
+        const positions = [
+          Cesium.Cartographic.fromRadians(carto.longitude, carto.latitude),
+          Cesium.Cartographic.fromRadians(carto.longitude - dLon, carto.latitude - dLat),
+          Cesium.Cartographic.fromRadians(carto.longitude + dLon, carto.latitude - dLat),
+          Cesium.Cartographic.fromRadians(carto.longitude - dLon, carto.latitude + dLat),
+          Cesium.Cartographic.fromRadians(carto.longitude + dLon, carto.latitude + dLat),
+        ];
+        const sampled = await Cesium.sampleTerrainMostDetailed(provider, positions);
+        if (cancelled || viewer.isDestroyed?.()) return;
+        const heights = sampled
+          .map((p: any) => p?.height)
+          .filter((h: any) => Number.isFinite(h));
+        if (heights.length === 0) {
+          lidarStore.setAutoFitStatus({ state: 'error', message: 'autoFitNoTerrain' });
+          return;
+        }
+        // Min of samples ≈ terrain minimum over the footprint: pairing it
+        // with the cloud's z_min cancels most of the slope-induced error.
+        const terrainMin = Math.min(...heights);
+        const activeLayer = layers.find((l: any) => l.id === selectedLayerId) ?? layers[0];
+        const groundRef =
+          activeLayer?.z_min != null
+            ? activeLayer.z_min
+            : carto.height - tileset.boundingSphere.radius;
+        const newOffset = Math.round((terrainMin - groundRef) * 100) / 100;
+        setHeightOffset(newOffset);
+        lidarStore.setAutoFitStatus({ state: 'done', offset: newOffset });
+      } catch (e) {
+        console.warn('[LidarLayer] Auto-fit failed:', e);
+        if (!cancelled) lidarStore.setAutoFitStatus({ state: 'error', message: 'autoFitFailed' });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFitToken]);
 
   // Show loading indicator while tileset(s) load
   if (layerVisible && isLoading) {

@@ -9,7 +9,8 @@ from typing import Optional
 
 import laspy
 import pdal
-import pyproj
+
+from app.services.vertical_datum import resolve_ecef_source_crs
 
 
 @dataclass
@@ -37,9 +38,18 @@ def inspect_laz_crs(file_path: str, source_crs_override: Optional[str] = None) -
         raise GeodesyValidationError(f"CRS_INSPECTION_FAILED:{exc}") from exc
 
 
-def reproject_to_ecef(input_laz: str, output_laz: str, source_crs: str) -> None:
+def reproject_to_ecef(input_laz: str, output_laz: str, source_crs: str) -> dict:
+    """Reproject a cloud to ECEF (EPSG:4978) for 3D Tiles.
+
+    When the declared CRS is horizontal-only and its vertical datum is known
+    (PNOA Spain → Alicante height / REDNAP), a compound CRS is used so PROJ
+    converts orthometric Z to ellipsoidal.  See vertical_datum.py.
+
+    Returns the vertical treatment applied (``vertical_reference``,
+    ``geoid_shift_m``) for persistence on the DigitalAsset entity.
+    """
     try:
-        pyproj.CRS.from_user_input(source_crs)
+        resolved = resolve_ecef_source_crs(source_crs)
     except Exception as exc:
         raise GeodesyValidationError(f"CRS_OPERATION_UNRESOLVED:{source_crs}") from exc
 
@@ -48,7 +58,7 @@ def reproject_to_ecef(input_laz: str, output_laz: str, source_crs: str) -> None:
             {"type": "readers.las", "filename": input_laz},
             {
                 "type": "filters.reprojection",
-                "in_srs": source_crs,
+                "in_srs": resolved.in_srs,
                 "out_srs": "EPSG:4978",
             },
             {
@@ -61,3 +71,7 @@ def reproject_to_ecef(input_laz: str, output_laz: str, source_crs: str) -> None:
     env = os.environ.copy()
     env["PROJ_NETWORK"] = env.get("PROJ_NETWORK", "ON")
     pdal.Pipeline(json.dumps(pipeline)).execute()
+    return {
+        "vertical_reference": resolved.vertical_reference,
+        "geoid_shift_m": resolved.geoid_shift_m,
+    }

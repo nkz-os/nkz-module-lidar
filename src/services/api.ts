@@ -62,6 +62,10 @@ export interface Layer {
     date_observed?: string;
     z_min?: number;
     z_max?: number;
+    /** Vertical datum treatment applied at processing time
+     * ("declared" | "compound:EPSG:5782" | null). Layers with a value
+     * render correctly at heightOffset 0. */
+    vertical_reference?: string | null;
 }
 
 export interface DetectedTree {

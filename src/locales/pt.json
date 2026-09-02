@@ -92,12 +92,19 @@
   "tree.biomass": "Biomassa Estimada",
   "tree.biomassApprox": "(aproximado)",
   "processingOptionsHint": "Aplicado ao iniciar um novo download ou upload",
-"heightOffset": "Ajuste de altura",
-"uploadedFiles": "Ficheiros Carregados",
-"cancelProcessing": "Cancelar processamento",
+  "heightOffset": "Ajuste de altura",
+  "uploadedFiles": "Ficheiros Carregados",
+  "cancelProcessing": "Cancelar processamento",
   "errorNoGeometry": "A geometria da entidade é necessária para o download do PNOA.",
   "loadingMetadata": "A carregar detalhes da entidade...",
   "noParcelSelected": "Nenhuma parcela selecionada",
   "selectParcelToUpload": "Selecione uma parcela no mapa para carregar dados LiDAR.",
-"noPolygonBoundary": "Esta parcela não tem contorno poligonal. O processamento LiDAR requer um polígono de parcela para recortar a nuvem de pontos."
+  "noPolygonBoundary": "Esta parcela não tem contorno poligonal. O processamento LiDAR requer um polígono de parcela para recortar a nuvem de pontos.",
+  "heightOffsetValue": "Valor exato (m)",
+  "autoFitHeight": "Ajustar ao terreno",
+  "autoFitHeightTitle": "Alinha automaticamente a nuvem de pontos com o terreno do Cesium",
+  "autoFitApplied": "Ajustado a {{value}} m",
+  "autoFitNoLayer": "Mostre primeiro a camada LiDAR para ajustá-la ao terreno",
+  "autoFitNoTerrain": "Nenhuma camada de elevação ativa no visualizador",
+  "autoFitFailed": "Não foi possível ajustar a altura automaticamente"
 }

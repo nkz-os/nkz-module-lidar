@@ -96,8 +96,15 @@
   "loadingMetadata": "Cargando detalles de la entidad...",
   "errorNoGeometry": "Se requiere la geometría de la entidad para la descarga del PNOA.",
   "processingOptionsHint": "Se aplica al iniciar una nueva descarga o subida",
-"heightOffset": "Ajuste de altura",
-"cancelProcessing": "Cancelar procesamiento",
-"uploadedFiles": "Archivos Subidos",
-"noPolygonBoundary": "Esta parcela no tiene contorno poligonal. El procesamiento LiDAR requiere un polígono de parcela para recortar la nube de puntos."
+  "heightOffset": "Ajuste de altura",
+  "cancelProcessing": "Cancelar procesamiento",
+  "uploadedFiles": "Archivos Subidos",
+  "noPolygonBoundary": "Esta parcela no tiene contorno poligonal. El procesamiento LiDAR requiere un polígono de parcela para recortar la nube de puntos.",
+  "heightOffsetValue": "Valor exacto (m)",
+  "autoFitHeight": "Ajustar al terreno",
+  "autoFitHeightTitle": "Alinea automáticamente la nube de puntos con el terreno de Cesium",
+  "autoFitApplied": "Ajustado a {{value}} m",
+  "autoFitNoLayer": "Muestra primero la capa LiDAR para ajustarla al terreno",
+  "autoFitNoTerrain": "No hay capa de elevación activa en el visor",
+  "autoFitFailed": "No se pudo ajustar automáticamente la altura"
 }

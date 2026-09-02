@@ -21,6 +21,7 @@ import {
   Cloud,
   Database,
   Trash2,
+  MoveVertical,
 } from 'lucide-react';
 import { SlotShell } from '@nekazari/viewer-kit';
 import {
@@ -78,6 +79,8 @@ const LidarLayerControl: React.FC = () => {
     setColorMode,
     heightOffset,
     setHeightOffset,
+    autoFitStatus,
+    requestAutoFit,
     isProcessing,
     processingJob,
     processingConfig,
@@ -99,6 +102,22 @@ const LidarLayerControl: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manualCrs, setManualCrs] = useState('');
   const [requiresManualCrs, setRequiresManualCrs] = useState(false);
+  const [offsetDraft, setOffsetDraft] = useState(heightOffset.toFixed(2));
+
+  // Keep the numeric draft in sync when the offset changes elsewhere
+  // (slider drag or auto-fit).
+  useEffect(() => {
+    setOffsetDraft(heightOffset.toFixed(2));
+  }, [heightOffset]);
+
+  const commitOffsetDraft = useCallback(() => {
+    const parsed = parseFloat(offsetDraft);
+    if (Number.isFinite(parsed)) {
+      setHeightOffset(Math.max(-100, Math.min(20, parsed)));
+    } else {
+      setOffsetDraft(heightOffset.toFixed(2));
+    }
+  }, [offsetDraft, heightOffset, setHeightOffset]);
   const [uploadJobStatus, setUploadJobStatus] = useState<{ progress: number; message: string } | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; filename: string; size_bytes: number }>>([]);
   const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
@@ -475,16 +494,56 @@ const LidarLayerControl: React.FC = () => {
                 ))}
               </div>
 
-              {/* Height offset slider */}
+              {/* Height offset: slider + precise numeric input + auto-fit */}
               <Slider
                 value={heightOffset}
                 onChange={setHeightOffset}
                 min={-100}
                 max={20}
-                step={1}
+                step={0.5}
                 label={t('heightOffset')}
                 unit="m"
               />
+              <div className="flex items-end gap-nkz-tight">
+                <div className="flex-1 min-w-0">
+                  <label className="text-nkz-xs font-semibold uppercase tracking-wider text-nkz-text-muted flex items-center gap-nkz-tight mb-nkz-tight">
+                    {t('heightOffsetValue')}
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={-100}
+                    max={20}
+                    value={offsetDraft}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOffsetDraft(e.target.value)}
+                    onBlur={commitOffsetDraft}
+                    onKeyDown={(e: React.KeyboardEvent) => {
+                      if (e.key === 'Enter') commitOffsetDraft();
+                    }}
+                    aria-label={t('heightOffsetValue')}
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={requestAutoFit}
+                  disabled={autoFitStatus.state === 'busy'}
+                  title={t('autoFitHeightTitle')}
+                >
+                  <MoveVertical className="w-4 h-4" />
+                  {t('autoFitHeight')}
+                </Button>
+              </div>
+              {autoFitStatus.state === 'done' && (
+                <p className="text-nkz-xs text-nkz-success-strong">
+                  {t('autoFitApplied', { value: autoFitStatus.offset?.toFixed(2) ?? '' })}
+                </p>
+              )}
+              {autoFitStatus.state === 'error' && (
+                <p className="text-nkz-xs text-nkz-danger-strong">
+                  {t(autoFitStatus.message ?? 'autoFitFailed')}
+                </p>
+              )}
 
               <Button
                 variant="ghost"

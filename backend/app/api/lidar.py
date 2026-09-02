@@ -139,6 +139,7 @@ class LayerResponse(BaseModel):
     date_observed: Optional[str]
     z_min: Optional[float] = None
     z_max: Optional[float] = None
+    vertical_reference: Optional[str] = None
 
 
 # ============================================================================
@@ -351,6 +352,7 @@ async def get_layers(
             date_observed=_prop(l, "dateObserved"),
             z_min=_prop(l, "zMin"),
             z_max=_prop(l, "zMax"),
+            vertical_reference=_prop(l, "verticalReference"),
         )
         for l in layers
     ]
@@ -380,6 +382,7 @@ async def get_layer(
         date_observed=_prop(layer, "dateObserved"),
         z_min=_prop(layer, "zMin"),
         z_max=_prop(layer, "zMax"),
+        vertical_reference=_prop(layer, "verticalReference"),
     )
 
 

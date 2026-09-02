@@ -27,6 +27,15 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/environment.yml
 RUN micromamba install -y -n base -f /tmp/environment.yml && \
     micromamba clean --all --yes
 
+# Bake the IGN geoid grids (orthometric Alicante/REDNAP heights -> ETRS89
+# ellipsoidal) into PROJ's data directory so the vertical datum transform in
+# geodesy_validator/vertical_datum is deterministic and does not depend on
+# runtime CDN access (PROJ_NETWORK stays ON as a fallback for other grids).
+RUN curl -fsSL -o /opt/conda/share/proj/es_ign_SPED2ETV2.tif \
+        https://cdn.proj.org/es_ign_SPED2ETV2.tif && \
+    curl -fsSL -o /opt/conda/share/proj/es_ign_egm08-rednap.tif \
+        https://cdn.proj.org/es_ign_egm08-rednap.tif
+
 # Activate environment for subsequent commands
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 

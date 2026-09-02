@@ -12,7 +12,7 @@ import React, { createContext, useContext, useState, ReactNode, useCallback, use
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
 import type { GeoJSONGeometry } from '../types';
-import { lidarStore, LayerScope } from './lidarStore';
+import { lidarStore, LayerScope, AutoFitStatus } from './lidarStore';
 import { useSyncExternalStore } from 'react';
 
 // ============================================================================
@@ -90,6 +90,9 @@ interface LidarContextType {
   setShowTrees: (show: boolean) => void;
   heightOffset: number;
   setHeightOffset: (offset: number) => void;
+  autoFitToken: number;
+  autoFitStatus: AutoFitStatus;
+  requestAutoFit: () => void;
   layerVisible: boolean;
   setLayerVisible: (visible: boolean) => void;
   layerScope: LayerScope;
@@ -175,6 +178,20 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     (callback) => lidarStore.subscribe(callback),
     () => lidarStore.heightOffset
   );
+
+  const autoFitStatus = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.autoFitStatus
+  );
+
+  const autoFitToken = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.autoFitToken
+  );
+
+  const requestAutoFit = useCallback(() => {
+    lidarStore.requestAutoFit();
+  }, []);
 
   const setSelectedLayerId = useCallback((id: string | null) => {
     lidarStore.setLayerState(id, lidarStore.activeTilesetUrl);
@@ -520,6 +537,9 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setShowTrees,
         heightOffset,
         setHeightOffset,
+        autoFitToken,
+        autoFitStatus,
+        requestAutoFit,
         layerVisible,
         setLayerVisible,
         layerScope,

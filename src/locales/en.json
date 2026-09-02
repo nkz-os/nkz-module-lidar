@@ -96,8 +96,15 @@
   "loadingMetadata": "Loading entity details...",
   "errorNoGeometry": "Entity geometry is required for PNOA download.",
   "processingOptionsHint": "Applied when starting a new download or upload",
-"heightOffset": "Height offset",
-"cancelProcessing": "Cancel processing",
-"uploadedFiles": "Uploaded Files",
-"noPolygonBoundary": "This parcel has no polygon boundary. LiDAR processing requires a parcel polygon to crop the point cloud."
+  "heightOffset": "Height offset",
+  "cancelProcessing": "Cancel processing",
+  "uploadedFiles": "Uploaded Files",
+  "noPolygonBoundary": "This parcel has no polygon boundary. LiDAR processing requires a parcel polygon to crop the point cloud.",
+  "heightOffsetValue": "Exact value (m)",
+  "autoFitHeight": "Fit to terrain",
+  "autoFitHeightTitle": "Automatically aligns the point cloud with the Cesium terrain",
+  "autoFitApplied": "Set to {{value}} m",
+  "autoFitNoLayer": "Show the LiDAR layer first to fit it to the terrain",
+  "autoFitNoTerrain": "No elevation layer active in the viewer",
+  "autoFitFailed": "Could not auto-fit the height"
 }

@@ -78,6 +78,8 @@ class LidarPipeline:
         self.z_max: Optional[float] = None
         self.detected_trees: List[Dict[str, Any]] = []
         self.source_crs: Optional[str] = None
+        self.vertical_reference: Optional[str] = None
+        self.geoid_shift_m: Optional[float] = None
         self.bounds_validator = GeoBoundsValidator(
             settings.EUROPE_BOUNDS_GEOJSON_PATH,
             buffer_km=settings.GEOBBOX_BUFFER_KM,
@@ -666,7 +668,9 @@ class LidarPipeline:
         source_laz = self.colored_laz or self.cropped_laz
         self.reprojected_laz = os.path.join(self.work_dir, "reprojected_ecef.laz")
         try:
-            reproject_to_ecef(source_laz, self.reprojected_laz, self.source_crs or "EPSG:4326")
+            vertical = reproject_to_ecef(source_laz, self.reprojected_laz, self.source_crs or "EPSG:4326")
+            self.vertical_reference = vertical.get("vertical_reference")
+            self.geoid_shift_m = vertical.get("geoid_shift_m")
         except GeodesyValidationError:
             raise
         except Exception as exc:
@@ -1066,6 +1070,8 @@ class LidarPipeline:
             classified_laz_url=upload_urls.get("classified_laz"),
             z_min=self.z_min,
             z_max=self.z_max,
+            vertical_reference=self.vertical_reference,
+            geoid_shift_m=self.geoid_shift_m,
         )
         self.update_job_status(
             "completed",
