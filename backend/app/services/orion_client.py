@@ -93,6 +93,7 @@ class OrionLDClient:
 
         with httpx.Client(timeout=30.0) as client:
             resp = client.request(method, url, json=json_data, headers=req_headers)
+        logger.info(f"[orion-sync] {method} {endpoint} -> {resp.status_code}")
         if resp.status_code not in (200, 201, 204):
             raise RuntimeError(f"Orion request failed {resp.status_code}: {resp.text}")
         if resp.content:
@@ -234,7 +235,9 @@ class OrionLDClient:
             entity["verticalReference"] = {"type": "Property", "value": vertical_reference}
         if geoid_shift_m is not None:
             entity["geoidShift"] = {"type": "Property", "value": geoid_shift_m}
+        logger.info(f"[orion-sync] creating DigitalAsset {entity_id} tenant={self.tenant_id} ctx={self.CONTEXT[1] if len(self.CONTEXT) > 1 else self.CONTEXT}")
         self._request_sync("POST", "/ngsi-ld/v1/entities", entity)
+        logger.info(f"[orion-sync] created DigitalAsset {entity_id}")
         return entity_id
 
     async def list_assets(self, parcel_id: Optional[str] = None) -> List[Dict[str, Any]]:
