@@ -53,6 +53,11 @@ const LidarLayerControl: React.FC = () => {
   useEffect(() => {
     // Listen for the global event we added to the Core dispatcher
     const handleGlobalSelect = (e: any) => {
+      const type = e.detail?.type;
+      // Lidar only tracks AgriParcel; ignore weather/sensor/etc. selections.
+      if (typeof type === 'string' && type && type !== 'AgriParcel' && !type.endsWith('/AgriParcel')) {
+        return;
+      }
       console.log('[LidarUI] Global event received:', e.detail.id);
       setLocalEntityId(e.detail.id);
     };

@@ -121,6 +121,15 @@ interface LidarContextType {
 
 const LidarContext = createContext<LidarContextType | undefined>(undefined);
 
+/**
+ * True when a host entity type refers to an AgriParcel (short SDM name or
+ * full URI form). Excludes AgriParcelRecord and other parcel-adjacent types.
+ */
+function _isParcelType(type: unknown): boolean {
+  if (typeof type !== 'string' || !type) return false;
+  return type === 'AgriParcel' || type.endsWith('/AgriParcel');
+}
+
 // ============================================================================
 // Provider Component
 // ============================================================================
@@ -141,6 +150,10 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     const handleGlobalSelect = (e: any) => {
       const { id, type } = e.detail;
+      // Lidar only tracks AgriParcel entities; ignore other selections
+      // (e.g. WeatherObserved, AgriSensor) to avoid useless refetches and
+      // 401 storms during token expiry.
+      if (!_isParcelType(type)) return;
       setSelectedEntityIdState(id);
       setSelectedEntityTypeState(type);
     };
@@ -151,6 +164,8 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Track selected ID to avoid redundant re-fetches
   const lastProcessedIdRef = useRef<string | null>(null);
+  // Dedupes refreshLayers per selected parcel (one fetch per id change).
+  const lastLayersIdRef = useRef<string | null>(null);
 
   // Entity geometry
   const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
@@ -250,6 +265,9 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Sync with host viewer context - fetch geometry when entity changes
   useEffect(() => {
+    // Lidar only cares about parcels; skip non-parcel selections.
+    if (!_isParcelType(viewer.selectedEntityType)) return;
+
     const fetchMetadata = async () => {
       const entityId = viewer.selectedEntityId;
       
@@ -336,6 +354,13 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setLayers([]);
       return;
     }
+
+    // Lidar only cares about parcels; skip non-parcel selections.
+    if (!_isParcelType(viewer.selectedEntityType)) return;
+
+    // Dedupe: one layers fetch per selected parcel.
+    if (viewer.selectedEntityId === lastLayersIdRef.current) return;
+    lastLayersIdRef.current = viewer.selectedEntityId;
 
     try {
       const fetchedLayers = await lidarApi.getLayers(viewer.selectedEntityId);
