@@ -80,6 +80,9 @@ const LidarLayerControl: React.FC = () => {
     selectedEntityGeometry,
     isLoadingMetadata,
     activeTilesetUrl,
+    selectedLayerId,
+    selectLayer,
+    setLayerVisible,
     colorMode,
     setColorMode,
     heightOffset,
@@ -667,9 +670,29 @@ const LidarLayerControl: React.FC = () => {
               <div className="flex flex-col gap-nkz-tight max-h-40 overflow-y-auto">
                 {layers.map((layer) => (
                   <div key={layer.id}>
-                    <div className="flex items-center justify-between p-nkz-inline rounded-nkz-md bg-nkz-surface-sunken hover:bg-nkz-surface transition-colors text-nkz-xs">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={selectedLayerId === layer.id}
+                      onClick={() => {
+                        selectLayer(layer.id, layer.tileset_url);
+                        setLayerVisible(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          selectLayer(layer.id, layer.tileset_url);
+                          setLayerVisible(true);
+                        }
+                      }}
+                      className={`flex items-center justify-between p-nkz-inline rounded-nkz-md transition-colors text-nkz-xs cursor-pointer ${
+                        selectedLayerId === layer.id
+                          ? 'bg-nkz-accent-soft ring-1 ring-nkz-accent-base'
+                          : 'bg-nkz-surface-sunken hover:bg-nkz-surface'
+                      }`}
+                    >
                       <div className="flex items-center gap-nkz-inline flex-1 min-w-0">
-                        <div className="w-1.5 h-1.5 rounded-full bg-nkz-accent-base flex-shrink-0" />
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selectedLayerId === layer.id ? 'bg-nkz-accent-strong' : 'bg-nkz-accent-base'}`} />
                         <span className="text-nkz-sm text-nkz-text-primary font-medium truncate">
                           {layer.source}
                         </span>

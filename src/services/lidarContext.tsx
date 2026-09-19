@@ -82,6 +82,7 @@ interface LidarContextType {
   activeTilesetUrl: string | null;
   setSelectedLayerId: (id: string | null) => void;
   setActiveTilesetUrl: (url: string | null) => void;
+  selectLayer: (layerId: string, tilesetUrl: string) => void;
 
   // Visualization
   colorMode: ColorMode;
@@ -214,6 +215,14 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setActiveTilesetUrl = useCallback((url: string | null) => {
     lidarStore.setLayerState(lidarStore.selectedLayerId, url);
+  }, []);
+
+  // Canonical "select AND display this layer": sets the id, its tileset URL
+  // and the per-layer height offset in one atomic store update. Using the two
+  // separate setters above is never sufficient alone (one keeps the old URL,
+  // the other keeps the old id).
+  const selectLayer = useCallback((layerId: string, tilesetUrl: string) => {
+    lidarStore.setLayerState(layerId, tilesetUrl);
   }, []);
 
   const setColorMode = useCallback((mode: ColorMode) => {
@@ -556,6 +565,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         activeTilesetUrl,
         setSelectedLayerId,
         setActiveTilesetUrl,
+        selectLayer,
         colorMode,
         setColorMode: setColorModeWithSync,
         showTrees,
