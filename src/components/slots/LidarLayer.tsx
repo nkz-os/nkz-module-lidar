@@ -210,6 +210,7 @@ export const LidarLayer: React.FC<LidarLayerProps> = ({ viewer: viewerProp }) =>
           const options = {
             maximumScreenSpaceError: sse,
             maximumMemoryUsage: 256,
+            skipLevelOfDetail: true,
             dynamicScreenSpaceError: true,
             dynamicScreenSpaceErrorDensity: 0.00278,
             dynamicScreenSpaceErrorFactor: 1.5,
