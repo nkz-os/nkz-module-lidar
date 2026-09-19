@@ -20,6 +20,8 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'classification', icon: '\u{1F3F7}' },
 ];
 
+const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
+
 const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
   const {
@@ -62,6 +64,7 @@ const LidarLayerToggle: React.FC = () => {
   return (
     <LayerMenuRow
       moduleId="lidar"
+      accent={lidarAccent}
       icon={<Mountain className="w-4 h-4" />}
       title="LiDAR"
       enabled={layerVisible}
