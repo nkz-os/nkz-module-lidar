@@ -359,20 +359,20 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Refresh layers list
   const refreshLayers = useCallback(async () => {
-    if (!viewer.selectedEntityId) {
-      setLayers([]);
-      return;
-    }
+    // No selection: list every tileset of the tenant so the layer can be
+    // shown from the viewer without picking a parcel first.
+    const parcelId = viewer.selectedEntityId || null;
 
     // Lidar only cares about parcels; skip non-parcel selections.
-    if (!_isParcelType(viewer.selectedEntityType)) return;
+    if (parcelId && !_isParcelType(viewer.selectedEntityType)) return;
 
-    // Dedupe: one layers fetch per selected parcel.
-    if (viewer.selectedEntityId === lastLayersIdRef.current) return;
-    lastLayersIdRef.current = viewer.selectedEntityId;
+    // Dedupe: one layers fetch per selected parcel (or for the whole tenant).
+    const key = parcelId ?? '__all__';
+    if (key === lastLayersIdRef.current) return;
+    lastLayersIdRef.current = key;
 
     try {
-      const fetchedLayers = await lidarApi.getLayers(viewer.selectedEntityId);
+      const fetchedLayers = await lidarApi.getLayers(parcelId ?? undefined);
       setLayers(fetchedLayers);
 
       // Auto-select first layer if available (once per entity) but do NOT
@@ -440,10 +440,8 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Refresh layers when entity changes. Resets auto-select flag so a new
   // parcel gets its first layer auto-activated.
   useEffect(() => {
-    if (viewer.selectedEntityId) {
-      hasAutoSelectedRef.current = false;
-      refreshLayers();
-    }
+    hasAutoSelectedRef.current = false;
+    refreshLayers();
   }, [viewer.selectedEntityId, refreshLayers]);
 
   // Check coverage when geometry is available

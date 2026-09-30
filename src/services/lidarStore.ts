@@ -29,8 +29,10 @@ class LidarStore {
   public showTrees: boolean = false;
   public heightOffset: number = LEGACY_DEFAULT_OFFSET;  // meters; 0 for datum-fixed layers
   public layers: any[] = [];
-  public layerVisible: boolean = false;
-  public layerScope: LayerScope = 'selected';
+  // Visible by default: the host's Layers panel switches the whole module on
+  // and off, so an active module shows its layer straight away.
+  public layerVisible: boolean = true;
+  public layerScope: LayerScope = 'all';
   public autoFitToken: number = 0;
   public autoFitStatus: AutoFitStatus = { state: 'idle' };
 

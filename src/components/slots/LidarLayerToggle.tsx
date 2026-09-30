@@ -20,7 +20,7 @@ const COLOR_MODES: { value: ColorMode; icon: string }[] = [
   { value: 'classification', icon: '\u{1F3F7}' },
 ];
 
-const lidarAccent = { base: '#8B5CF6', soft: '#EDE9FE', strong: '#6D28D9' };
+const lidarAccent = { base: '#0EA5E9', soft: '#E0F2FE', strong: '#0369A1' };
 
 const LidarLayerToggle: React.FC = () => {
   const { t } = useTranslation('lidar');
@@ -37,11 +37,14 @@ const LidarLayerToggle: React.FC = () => {
     colorMode,
     setColorMode,
     isProcessing,
+    selectedEntityId,
   } = useLidarContext();
 
   const hasAnyLayer = Array.isArray(layers) && layers.length > 0;
 
   const handleToggle = (next: boolean) => {
+    // Without a selected parcel only the tenant-wide scope can show anything.
+    if (next && !selectedEntityId && layerScope === 'selected') setLayerScope('all');
     setLayerVisible(next);
     // When turning on under 'selected' scope, prime an active tileset
     // so the layer effect has something to mount.
