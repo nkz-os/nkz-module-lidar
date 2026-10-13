@@ -8,6 +8,7 @@
  * - Color mode for visualization
  */
 
+import { API_ORIGIN } from './apiOrigin';
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect, useRef } from 'react';
 import { useViewer } from '../sdk';
 import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
@@ -319,7 +320,7 @@ export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         // Include Link header for proper context resolution
         headers['Link'] = `<${contextUrl}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`;
 
-        const response = await fetch(`/ngsi-ld/v1/entities/${encodeURIComponent(entityId)}`, {
+        const response = await fetch(`${API_ORIGIN}/ngsi-ld/v1/entities/${encodeURIComponent(entityId)}`, {
           headers,
           credentials: 'include',
         });

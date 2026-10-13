@@ -4,6 +4,8 @@
  * Provides type-safe API calls to the LIDAR backend.
  */
 
+import { API_ORIGIN } from './apiOrigin';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -89,7 +91,7 @@ class LidarApiClient {
     private baseUrl: string;
 
     constructor() {
-        this.baseUrl = '/api/lidar';
+        this.baseUrl = `${API_ORIGIN}/api/lidar`;
     }
 
     private async request<T>(
