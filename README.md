@@ -1,0 +1,175 @@
+# LIDAR Module - Nekazari Platform
+
+LIDAR Point Cloud Viewer module for the Nekazari Platform. This module enables visualization of LIDAR point cloud data (LAZ files) from IDENA (Infraestructura de Datos Espaciales de Navarra) in the unified CesiumJS viewer.
+
+## Features
+
+- Download LAZ files from IDENA for selected parcels
+- Automatic conversion to 3D Tiles format for CesiumJS
+- Interactive point cloud visualization in the unified viewer
+- Integration with unified viewer slots (layer-toggle, map-layer, context-panel)
+
+## Architecture
+
+### Backend
+- FastAPI service for LIDAR data download and conversion
+- REST API endpoints for layer management
+- Integration with IDENA data sources
+
+### Frontend
+- React application compiled as a single-file IIFE bundle (runtime script injection)
+- Integration with unified viewer via slots
+- CesiumJS 3D Tiles visualization
+
+## Development
+
+### Prerequisites
+- Node.js 20+
+- Python 3.11+
+- Docker (for containerized deployment)
+
+### Local Development
+
+#### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+#### Frontend
+```bash
+npm install
+npm run dev  # Starts on port 5004
+```
+
+## Deployment
+
+### Build Frontend IIFE Bundle
+
+The Nekazari host loads modules at runtime by injecting a `<script>` tag that points to a single-file IIFE bundle.
+
+```bash
+# Frontend (IIFE bundle)
+npm install
+npm run build
+# outputs: dist/nkz-module.js
+```
+
+### Backend Docker Image
+
+Build context matters: the backend Dockerfile expects files from `backend/` (e.g. `environment.yml`), so use `./backend` as context.
+
+```bash
+# Backend (context = ./backend)
+docker build -f backend/Dockerfile -t ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest ./backend
+docker push ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
+# then restart the lidar-api and lidar-worker deployments
+```
+
+### Recommended Production Flow (Option 2: Immutable image tags)
+
+Use immutable GHCR tags and commit the tag into `k8s/backend-deployment.yaml` so ArgoCD reconciles deterministically:
+
+1. Publish image with immutable tag:
+   - via GitHub Actions workflow `.github/workflows/backend-image-ghcr.yml` (manual dispatch with `image_tag`)
+   - or from CI on `main` (auto `sha-<short_sha>` tag)
+2. Pin manifest image by editing `k8s/backend-deployment.yaml`:
+   - replace `ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest`
+   - with `ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:<immutable_tag>`
+   - update both deployments (`lidar-api` and `lidar-worker`)
+3. Commit and push manifest change.
+4. ArgoCD sync applies the exact immutable image tag.
+
+This avoids silent drift from `:latest` and improves traceability/auditability.
+
+### Frontend Deployment (Production)
+
+Upload the IIFE bundle to MinIO so it becomes available at `/modules/lidar/nkz-module.js`.
+
+**CRITICAL: The correct MinIO bucket is `nekazari-frontend`, NOT `frontend-static`.**  
+The nginx `frontend-static` pod proxies `/modules/` → `minio-service:9000/nekazari-frontend/modules/`.  
+Uploading to the wrong bucket will silently serve the old bundle.
+
+```bash
+# Build the IIFE bundle
+npm run build
+# Output: dist/nkz-module.js
+
+# Upload to MinIO (from a pod with boto3 access):
+python3 -c "
+import boto3, os
+from botocore.client import Config
+client = boto3.client('s3',
+    endpoint_url='http://minio-service:9000',
+    aws_access_key_id=os.environ['MINIO_ACCESS_KEY'],
+    aws_secret_access_key=os.environ['MINIO_SECRET_KEY'],
+    config=Config(signature_version='s3v4'), region_name='us-east-1')
+client.put_object(
+    Bucket='nekazari-frontend',
+    Key='modules/lidar/nkz-module.js',
+    Body=open('dist/nkz-module.js', 'rb').read(),
+    ContentType='application/javascript')
+print('Uploaded to nekazari-frontend/modules/lidar/nkz-module.js')
+"
+```
+
+The IIFE bundle URL must match `marketplace_modules.remote_entry_url` (see `k8s/registration.sql`).
+Default value: `/modules/lidar/nkz-module.js`.
+
+### Kubernetes Deployment (backend only)
+
+```bash
+# Apply backend deployments to your target namespace
+kubectl apply -f k8s/backend-deployment.yaml
+
+# Register module in platform database
+psql -h <db-host> -U <user> -d nekazari -f k8s/registration.sql
+```
+
+### Deploy to production (GitOps, manual)
+
+From your machine: commit and push. On the server:
+
+```bash
+ssh g@<production-server>
+cd ~/nkz-module-lidar
+git pull origin main
+
+# Build and push images (requires Docker login to GHCR)
+docker build -f backend/Dockerfile -t ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest ./backend
+docker push ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest
+
+docker build -f frontend/Dockerfile -t ghcr.io/nkz-os/nkz-module-lidar/lidar-frontend:latest .
+docker push ghcr.io/nkz-os/nkz-module-lidar/lidar-frontend:latest
+
+# Rollout so pods use the new images (imagePullPolicy: Always)
+# (restart the lidar-frontend, lidar-api and lidar-worker deployments)
+```
+
+## Module Integration
+
+This module integrates with the Nekazari Platform through:
+
+1. **Runtime Script Injection (IIFE)**: the host injects `/modules/lidar/nkz-module.js`
+2. **Slot System**: provides widgets for:
+   - `layer-toggle`: Layer control widget
+   - `map-layer`: CesiumJS 3D Tiles layer
+   - `context-panel`: Configuration panel
+
+## API Endpoints
+
+- `GET /api/lidar/layers` - List available LIDAR layers
+- `POST /api/lidar/layers` - Create new LIDAR layer (download and convert)
+- `GET /api/lidar/layers/{layer_id}` - Get layer details
+- `DELETE /api/lidar/layers/{layer_id}` - Delete layer
+
+## Notes
+
+- LAZ to 3D Tiles conversion requires additional tooling (PDAL, 3d-tiles-tools, etc.)
+- IDENA data access may require authentication/API keys
+- Large point clouds may require significant storage and processing resources
+
+## License
+
+Apache-2.0

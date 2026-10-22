@@ -1,0 +1,610 @@
+/**
+ * LIDAR Context - Enhanced Module State Management
+ *
+ * Manages:
+ * - Selected entity/parcel (synced with host via useViewer)
+ * - Active layer and tileset
+ * - Processing job state
+ * - Color mode for visualization
+ */
+
+import { API_ORIGIN } from './apiOrigin';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect, useRef } from 'react';
+import { useViewer } from '../sdk';
+import { lidarApi, JobStatus, Layer, ProcessingConfig, DEFAULT_PROCESSING_CONFIG } from './api';
+import type { GeoJSONGeometry } from '../types';
+import { lidarStore, LayerScope, AutoFitStatus } from './lidarStore';
+import { useSyncExternalStore } from 'react';
+
+// ============================================================================
+// Cross-Provider Sync Events
+// ============================================================================
+// When multiple LidarProvider instances exist (one per slot: context-panel,
+// map-layer, layer-toggle), they each have independent React state.
+// These custom events keep critical state synchronized across instances.
+const SYNC_EVENT = 'lidar:sync';
+const COLORMODE_EVENT = 'lidar:colormode';
+
+/**
+ * Convert GeoJSON geometry to WKT string
+ */
+function geoJsonToWkt(geojson: GeoJSONGeometry): string | null {
+  if (!geojson || !geojson.type) return null;
+
+  const formatCoord = (coord: number[]) => `${coord[0]} ${coord[1]}`;
+  const formatRing = (ring: number[][]) => ring.map(formatCoord).join(', ');
+
+  // PDAL filters.crop requires Polygon or MultiPolygon.
+  // Other geometry types (Point, LineString, GeometryCollection, etc.)
+  // cannot be used for point-cloud cropping.
+  switch (geojson.type) {
+    case 'Polygon': {
+      const rings = geojson.coordinates.map(
+        (ring: number[][]) => `(${formatRing(ring)})`
+      ).join(', ');
+      return `POLYGON(${rings})`;
+    }
+    case 'MultiPolygon': {
+      const polys = geojson.coordinates.map(
+        (poly: number[][][]) =>
+          `(${poly.map((ring: number[][]) => `(${formatRing(ring)})`).join(', ')})`
+      ).join(', ');
+      return `MULTIPOLYGON(${polys})`;
+    }
+    default:
+      // Point, LineString, MultiPoint, MultiLineString, GeometryCollection, etc.
+      // are NOT valid crop geometries for PDAL.
+      console.warn(
+        `[lidar] Geometry type "${geojson.type}" is not supported for LiDAR crop. ` +
+        `Only Polygon and MultiPolygon are valid. This parcel may only have a centroid — ` +
+        `LiDAR processing requires a polygon boundary.`
+      );
+      return null;
+  }
+}
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type ColorMode = 'height' | 'ndvi' | 'rgb' | 'classification';
+export type { LayerScope };
+
+interface LidarContextType {
+  // Entity Selection
+  selectedEntityId: string | null;
+  selectedEntityGeometry: string | null; // WKT
+  isLoadingMetadata: boolean;
+  setSelectedEntityId: (id: string | null) => void;
+  setSelectedEntityGeometry: (wkt: string | null) => void;
+
+  // Layer State
+  selectedLayerId: string | null;
+  activeTilesetUrl: string | null;
+  setSelectedLayerId: (id: string | null) => void;
+  setActiveTilesetUrl: (url: string | null) => void;
+  selectLayer: (layerId: string, tilesetUrl: string) => void;
+
+  // Visualization
+  colorMode: ColorMode;
+  setColorMode: (mode: ColorMode) => void;
+  showTrees: boolean;
+  setShowTrees: (show: boolean) => void;
+  heightOffset: number;
+  setHeightOffset: (offset: number) => void;
+  autoFitToken: number;
+  autoFitStatus: AutoFitStatus;
+  requestAutoFit: () => void;
+  layerVisible: boolean;
+  setLayerVisible: (visible: boolean) => void;
+  layerScope: LayerScope;
+  setLayerScope: (scope: LayerScope) => void;
+
+  // Processing
+  isProcessing: boolean;
+  processingJob: JobStatus | null;
+  processingConfig: ProcessingConfig;
+  setProcessingConfig: (config: ProcessingConfig) => void;
+  startProcessing: () => Promise<void>;
+  cancelProcessing: () => Promise<void>;
+
+  // Coverage
+  hasCoverage: boolean | null;
+  checkCoverage: () => Promise<boolean>;
+
+  // Layers
+  layers: Layer[];
+  refreshLayers: () => Promise<void>;
+  deleteLayer: (layerId: string) => Promise<void>;
+
+  // Reset
+  resetContext: () => void;
+}
+
+const LidarContext = createContext<LidarContextType | undefined>(undefined);
+
+/**
+ * True when a host entity type refers to an AgriParcel (short SDM name or
+ * full URI form). Excludes AgriParcelRecord and other parcel-adjacent types.
+ */
+function _isParcelType(type: unknown): boolean {
+  if (typeof type !== 'string' || !type) return false;
+  return type === 'AgriParcel' || type.endsWith('/AgriParcel');
+}
+
+// ============================================================================
+// Provider Component
+// ============================================================================
+
+export const LidarProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Unique ID for this provider instance
+  const providerIdRef = useRef(Math.random().toString(36).slice(2));
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Get entity selection from host
+  const viewer = useViewer();
+  
+  // Local state for selected entity to ensure reactivity via events
+  const [_selectedEntityId, setSelectedEntityIdState] = useState<string | null>(viewer.selectedEntityId);
+  const [_selectedEntityType, setSelectedEntityTypeState] = useState<string | null>(viewer.selectedEntityType);
+
+  // Sync with global events (Direct connection)
+  useEffect(() => {
+    const handleGlobalSelect = (e: any) => {
+      const { id, type } = e.detail;
+      // Lidar only tracks AgriParcel entities; ignore other selections
+      // (e.g. WeatherObserved, AgriSensor) to avoid useless refetches and
+      // 401 storms during token expiry.
+      if (!_isParcelType(type)) return;
+      setSelectedEntityIdState(id);
+      setSelectedEntityTypeState(type);
+    };
+
+    window.addEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+    return () => window.removeEventListener('nekazari:entity:selected' as any, handleGlobalSelect);
+  }, []);
+
+  // Track selected ID to avoid redundant re-fetches
+  const lastProcessedIdRef = useRef<string | null>(null);
+  // Dedupes refreshLayers per selected parcel (one fetch per id change).
+  const lastLayersIdRef = useRef<string | null>(null);
+
+  // Entity geometry
+  const [selectedEntityGeometry, setSelectedEntityGeometry] = useState<string | null>(null);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+
+  // Layer state synced across instances
+  const selectedLayerId = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.selectedLayerId
+  );
+  const activeTilesetUrl = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.activeTilesetUrl
+  );
+  const colorMode = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.colorMode
+  );
+  const showTrees = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.showTrees
+  );
+
+  const heightOffset = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.heightOffset
+  );
+
+  const autoFitStatus = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.autoFitStatus
+  );
+
+  const autoFitToken = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.autoFitToken
+  );
+
+  const requestAutoFit = useCallback(() => {
+    lidarStore.requestAutoFit();
+  }, []);
+
+  const setSelectedLayerId = useCallback((id: string | null) => {
+    lidarStore.setLayerState(id, lidarStore.activeTilesetUrl);
+  }, []);
+
+  const setActiveTilesetUrl = useCallback((url: string | null) => {
+    lidarStore.setLayerState(lidarStore.selectedLayerId, url);
+  }, []);
+
+  // Canonical "select AND display this layer": sets the id, its tileset URL
+  // and the per-layer height offset in one atomic store update. Using the two
+  // separate setters above is never sufficient alone (one keeps the old URL,
+  // the other keeps the old id).
+  const selectLayer = useCallback((layerId: string, tilesetUrl: string) => {
+    lidarStore.setLayerState(layerId, tilesetUrl);
+  }, []);
+
+  const setColorMode = useCallback((mode: ColorMode) => {
+    lidarStore.setColorMode(mode);
+  }, []);
+
+  const setShowTrees = useCallback((show: boolean) => {
+    lidarStore.setShowTrees(show);
+  }, []);
+
+  const setHeightOffset = useCallback((offset: number) => {
+    lidarStore.setHeightOffset(offset);
+  }, []);
+
+  const layers = useSyncExternalStore(
+    (callback) => lidarStore.subscribe(callback),
+    () => lidarStore.layers
+  );
+
+  const setLayers = useCallback((newLayers: Layer[]) => {
+    lidarStore.setLayers(newLayers);
+  }, []);
+
+  const layerVisible = useSyncExternalStore(
+    (cb) => lidarStore.subscribe(cb),
+    () => lidarStore.layerVisible
+  );
+
+  const layerScope = useSyncExternalStore(
+    (cb) => lidarStore.subscribe(cb),
+    () => lidarStore.layerScope
+  );
+
+  const setLayerVisible = useCallback((visible: boolean) => {
+    lidarStore.setLayerVisible(visible);
+  }, []);
+
+  const setLayerScope = useCallback((scope: LayerScope) => {
+    lidarStore.setLayerScope(scope);
+  }, []);
+
+  // Processing state
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingJob, setProcessingJob] = useState<JobStatus | null>(null);
+  const [processingConfig, setProcessingConfig] = useState<ProcessingConfig>(DEFAULT_PROCESSING_CONFIG);
+
+  // Coverage state
+  const [hasCoverage, setHasCoverage] = useState<boolean | null>(null);
+
+  // Sync with host viewer context - fetch geometry when entity changes
+  useEffect(() => {
+    // Lidar only cares about parcels; skip non-parcel selections.
+    if (!_isParcelType(viewer.selectedEntityType)) return;
+
+    const fetchMetadata = async () => {
+      const entityId = viewer.selectedEntityId;
+      
+      // Avoid redundant fetches if ID hasn't changed
+      if (entityId === lastProcessedIdRef.current) return;
+      lastProcessedIdRef.current = entityId;
+
+      if (!entityId) {
+        setSelectedEntityGeometry(null);
+        setSelectedLayerId(null);
+        setActiveTilesetUrl(null);
+        setHasCoverage(null);
+        setProcessingJob(null);
+        return;
+      }
+
+      // Reset state for new valid entity
+      setSelectedLayerId(null);
+      setActiveTilesetUrl(null);
+      setHasCoverage(null);
+      setProcessingJob(null);
+      setIsLoadingMetadata(true);
+
+      try {
+        // Retrieve tenant and auth from host context
+        const auth = (window as any).__nekazariAuthContext;
+        const tenantId = auth?.tenantId;
+        const contextUrl = auth?.contextUrl || 'https://uri.fiware.org/ns/context.jsonld';
+
+        const headers: HeadersInit = {
+          'Accept': 'application/ld+json',
+        };
+        
+        // Ensure NGSI-LD tenant propagation
+        if (tenantId) {
+          headers['NGSILD-Tenant'] = tenantId;
+          headers['X-Tenant-ID'] = tenantId;
+        }
+        
+        // Include Link header for proper context resolution
+        headers['Link'] = `<${contextUrl}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`;
+
+        const response = await fetch(`${API_ORIGIN}/ngsi-ld/v1/entities/${encodeURIComponent(entityId)}`, {
+          headers,
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const entity = await response.json();
+          // location can be in 'location' (NGSI-LD) or 'location.value' (normalized)
+          const location = entity.location?.value || entity.location;
+          if (location) {
+            const wkt = geoJsonToWkt(location as GeoJSONGeometry);
+            setSelectedEntityGeometry(wkt);
+          }
+        } else {
+          console.warn(`[LidarContext] Failed to fetch entity metadata: ${response.status}`);
+        }
+      } catch (error) {
+        console.error('[LidarContext] Exception fetching entity geometry:', error);
+      } finally {
+        setIsLoadingMetadata(false);
+      }
+    };
+
+    fetchMetadata();
+  }, [viewer.selectedEntityId, viewer.selectedEntityType]);
+
+  // Wrapper for selectEntity to match our interface (just id, not id + type)
+  const setSelectedEntityId = useCallback((id: string | null) => {
+    viewer.selectEntity(id, id ? 'AgriParcel' : null);
+  }, [viewer]);
+
+  // Track whether we've already auto-selected a layer to prevent infinite
+  // cascade: refreshLayers → setSelectedLayerId → selectedLayerId changes →
+  // refreshLayers ref changes → entity-change effect re-fires → refreshLayers
+  // again → setLayers with new array ref → LidarLayer destroys + recreates
+  // tileset mid-render → Cesium "this._root is undefined" crash.
+  const hasAutoSelectedRef = useRef(false);
+
+  // Refresh layers list
+  const refreshLayers = useCallback(async () => {
+    // No selection: list every tileset of the tenant so the layer can be
+    // shown from the viewer without picking a parcel first.
+    const parcelId = viewer.selectedEntityId || null;
+
+    // Lidar only cares about parcels; skip non-parcel selections.
+    if (parcelId && !_isParcelType(viewer.selectedEntityType)) return;
+
+    // Dedupe: one layers fetch per selected parcel (or for the whole tenant).
+    const key = parcelId ?? '__all__';
+    if (key === lastLayersIdRef.current) return;
+    lastLayersIdRef.current = key;
+
+    try {
+      const fetchedLayers = await lidarApi.getLayers(parcelId ?? undefined);
+      setLayers(fetchedLayers);
+
+      // Auto-select first layer if available (once per entity) but do NOT
+      // auto-show it.  The user must explicitly toggle the layer via the
+      // layer-toggle slot.  Auto-visible + auto-flyTo steals the camera
+      // and, when combined with a regional PNOA outage, makes the map
+      // appear completely broken.
+      if (fetchedLayers.length > 0 && !hasAutoSelectedRef.current) {
+        hasAutoSelectedRef.current = true;
+        console.log('[LidarContext] Auto-selecting layer (not visible):', fetchedLayers[0].id);
+        lidarStore.setLayerState(fetchedLayers[0].id, fetchedLayers[0].tileset_url);
+      }
+    } catch (error) {
+      console.error('[LidarContext] Failed to refresh layers:', error);
+    }
+  }, [viewer.selectedEntityId]);
+
+  // Cross-provider sync of layers now handled entirely by the shared
+  // lidarStore + useSyncExternalStore.  The SYNC_EVENT dispatch is dead
+  // code kept only for the listener below (COLORMODE_EVENT still active).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.providerId === providerIdRef.current) return;
+      const entityId = viewer.selectedEntityId;
+      if (entityId) {
+        lidarApi.getLayers(entityId).then(fetchedLayers => {
+          setLayers(fetchedLayers);
+          if (fetchedLayers.length > 0) {
+            setSelectedLayerId(fetchedLayers[0].id);
+            setActiveTilesetUrl(fetchedLayers[0].tileset_url);
+          } else {
+            setSelectedLayerId(null);
+            setActiveTilesetUrl(null);
+          }
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener(SYNC_EVENT, handler);
+    return () => window.removeEventListener(SYNC_EVENT, handler);
+  }, [viewer.selectedEntityId]);
+
+  // Listen for color mode changes from other provider instances
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.providerId === providerIdRef.current) return;
+      setColorMode(detail.mode);
+    };
+    window.addEventListener(COLORMODE_EVENT, handler);
+    return () => window.removeEventListener(COLORMODE_EVENT, handler);
+  }, []);
+
+  // Delete a layer
+  const deleteLayerFn = useCallback(async (layerId: string) => {
+    await lidarApi.deleteLayer(layerId);
+    // If deleted layer was active, clear it
+    if (selectedLayerId === layerId) {
+      setSelectedLayerId(null);
+      setActiveTilesetUrl(null);
+    }
+    await refreshLayers();
+  }, [selectedLayerId, refreshLayers]);
+
+  // Refresh layers when entity changes. Resets auto-select flag so a new
+  // parcel gets its first layer auto-activated.
+  useEffect(() => {
+    hasAutoSelectedRef.current = false;
+    refreshLayers();
+  }, [viewer.selectedEntityId, refreshLayers]);
+
+  // Check coverage when geometry is available
+  const checkCoverage = useCallback(async (): Promise<boolean> => {
+    if (!selectedEntityGeometry) {
+      setHasCoverage(false);
+      return false;
+    }
+
+    try {
+      const response = await lidarApi.checkCoverage(selectedEntityGeometry);
+      setHasCoverage(response.has_coverage);
+      return response.has_coverage;
+    } catch (error) {
+      console.error('[LidarContext] Coverage check failed:', error);
+      setHasCoverage(false);
+      return false;
+    }
+  }, [selectedEntityGeometry]);
+
+
+  // Start processing job
+  const startProcessing = useCallback(async () => {
+    if (!viewer.selectedEntityId || !selectedEntityGeometry) {
+      throw new Error('No entity selected');
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    setIsProcessing(true);
+    setProcessingJob(null);
+
+    try {
+      const response = await lidarApi.startProcessing({
+        parcel_id: viewer.selectedEntityId,
+        parcel_geometry_wkt: selectedEntityGeometry,
+        config: processingConfig,
+      });
+
+      // Poll for completion
+      const finalStatus = await lidarApi.pollJobStatus(
+        response.job_id,
+        (status) => {
+          setProcessingJob(status);
+        },
+        2000,
+        300,
+        abortControllerRef.current.signal,
+      );
+
+      // Update with final results.
+      // refreshLayers() already updates the shared lidarStore which all
+      // LidarProvider instances subscribe to via useSyncExternalStore.
+      // Calling notifyOtherProviders() here would trigger a redundant
+      // API fetch in sibling instances, producing a new layers array
+      // reference that causes LidarLayer to destroy + recreate tilesets
+      // mid-render → Cesium "this._root is undefined" crash.
+      if (finalStatus.tileset_url) {
+        setActiveTilesetUrl(finalStatus.tileset_url);
+        hasAutoSelectedRef.current = false;
+        await refreshLayers();
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('[LidarContext] Processing failed:', error);
+        throw error;
+      }
+    } finally {
+      setIsProcessing(false);
+      abortControllerRef.current = null;
+    }
+  }, [viewer.selectedEntityId, selectedEntityGeometry, processingConfig, refreshLayers]);
+
+  const cancelProcessing = useCallback(async () => {
+    abortControllerRef.current?.abort();
+    if (processingJob?.job_id) {
+      try {
+        await lidarApi.cancelJob(processingJob.job_id);
+      } catch (e) {
+        console.error('Failed to cancel job on server:', e);
+      }
+    }
+    setIsProcessing(false);
+    setProcessingJob(null);
+  }, [processingJob]);
+
+  // Color mode setter with cross-provider sync
+  const setColorModeWithSync = useCallback((mode: ColorMode) => {
+    setColorMode(mode);
+    window.dispatchEvent(new CustomEvent(COLORMODE_EVENT, {
+      detail: { providerId: providerIdRef.current, mode }
+    }));
+  }, []);
+
+  // Reset all state (except entity selection which comes from host)
+  const resetContext = useCallback(() => {
+    viewer.selectEntity(null);
+    setSelectedEntityGeometry(null);
+    setSelectedLayerId(null);
+    setActiveTilesetUrl(null);
+    setLayers([]);
+    setColorMode('height');
+    setShowTrees(false);
+    setIsProcessing(false);
+    setProcessingJob(null);
+    setHasCoverage(null);
+  }, [viewer]);
+
+  return (
+    <LidarContext.Provider
+      value={{
+        selectedEntityId: viewer.selectedEntityId,
+        selectedEntityGeometry,
+        isLoadingMetadata,
+        setSelectedEntityId,
+        setSelectedEntityGeometry,
+        selectedLayerId,
+        activeTilesetUrl,
+        setSelectedLayerId,
+        setActiveTilesetUrl,
+        selectLayer,
+        colorMode,
+        setColorMode: setColorModeWithSync,
+        showTrees,
+        setShowTrees,
+        heightOffset,
+        setHeightOffset,
+        autoFitToken,
+        autoFitStatus,
+        requestAutoFit,
+        layerVisible,
+        setLayerVisible,
+        layerScope,
+        setLayerScope,
+        isProcessing,
+        processingJob,
+        processingConfig,
+        setProcessingConfig,
+        startProcessing,
+        cancelProcessing,
+        hasCoverage,
+        checkCoverage,
+        layers,
+        refreshLayers,
+        deleteLayer: deleteLayerFn,
+        resetContext,
+      }}
+    >
+      {children}
+    </LidarContext.Provider>
+  );
+};
+
+// ============================================================================
+// Hook
+// ============================================================================
+
+export const useLidarContext = () => {
+  const context = useContext(LidarContext);
+  if (context === undefined) {
+    throw new Error('useLidarContext must be used within a LidarProvider');
+  }
+  return context;
+};

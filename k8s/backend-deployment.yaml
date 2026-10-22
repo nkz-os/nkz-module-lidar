@@ -1,0 +1,269 @@
+# =============================================================================
+# LIDAR Module Backend Deployment
+# =============================================================================
+# FastAPI API Service + RQ Worker for heavy LiDAR processing
+# Uses Conda/Mamba base image with PDAL, GDAL, py3dtiles
+# =============================================================================
+
+---
+# Deployment: LIDAR Module API Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lidar-api
+  namespace: nekazari
+  labels:
+    app: lidar-api
+    component: backend
+    module: lidar
+    nkz-os.org/profile: addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lidar-api
+  template:
+    metadata:
+      labels:
+        app: lidar-api
+        component: backend
+        module: lidar
+    spec:
+      volumes:
+        - name: proj-cache
+          persistentVolumeClaim:
+            claimName: lidar-proj-cache-pvc
+      containers:
+        - name: api
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest  # feat: PNOA downloader multi-strategy
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # Redis (with password from secret)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+            # MinIO (use existing minio-secret)
+            - name: MINIO_ENDPOINT
+              value: "minio-service:9000"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-user
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-password
+            - name: MINIO_BUCKET
+              value: "lidar-tilesets"
+            - name: TILESET_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: TILESET_PUBLIC_URL
+            - name: MINIO_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: MINIO_PUBLIC_BASE_URL
+            # Orion-LD
+            - name: ORION_URL
+              value: "http://orion-ld-service:1026"
+            - name: ORION_CONTEXT_URL
+              value: "http://api-gateway-service:5000/ngsi-ld-context.json"
+            - name: COVERAGE_INDEX_GEOJSON_PATH
+              value: "/app/data/lidar_coverage.geojson"
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: CORS_ORIGINS
+            # PROJ data path for GDAL/PDAL CRS operations
+            - name: PROJ_DATA
+              value: "/opt/conda/share/proj"
+            - name: PROJ_LIB
+              value: "/opt/conda/share/proj"
+            - name: PROJ_NETWORK
+              value: "ON"
+            - name: PROJ_USER_WRITABLE_DIRECTORY
+              value: "/var/cache/proj"
+            # Upload limits
+            - name: MAX_UPLOAD_SIZE
+              value: "524288000"
+          volumeMounts:
+            - name: proj-cache
+              mountPath: /var/cache/proj
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+---
+# Deployment: LIDAR Worker (RQ) - reduced resources for single-node
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lidar-worker
+  namespace: nekazari
+  labels:
+    app: lidar-worker
+    component: worker
+    module: lidar
+    nkz-os.org/profile: addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lidar-worker
+  template:
+    metadata:
+      labels:
+        app: lidar-worker
+        component: worker
+        module: lidar
+    spec:
+      volumes:
+        - name: proj-cache
+          persistentVolumeClaim:
+            claimName: lidar-proj-cache-pvc
+      containers:
+        - name: worker
+          image: ghcr.io/nkz-os/nkz-module-lidar/lidar-backend:latest  # feat: PNOA downloader multi-strategy
+          imagePullPolicy: Always
+          # Use app.worker so logging.basicConfig runs and pipeline logs (download, Phase A/B/C/D) are visible
+          command:
+            [
+              "/bin/sh",
+              "-c",
+              "exec /opt/conda/bin/python -m app.worker",
+            ]
+          env:
+            # Database
+            # Redis (with password from secret)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+            # MinIO
+            - name: MINIO_ENDPOINT
+              value: "minio-service:9000"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-user
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-password
+            - name: MINIO_BUCKET
+              value: "lidar-tilesets"
+            - name: TILESET_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: TILESET_PUBLIC_URL
+            - name: MINIO_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: MINIO_PUBLIC_BASE_URL
+            # Orion-LD
+            - name: ORION_URL
+              value: "http://orion-ld-service:1026"
+            - name: ORION_CONTEXT_URL
+              value: "http://api-gateway-service:5000/ngsi-ld-context.json"
+            - name: COVERAGE_INDEX_GEOJSON_PATH
+              value: "/app/data/lidar_coverage.geojson"
+            # Same allowlist as API; worker applies MinIO bucket CORS via StorageService.
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: lidar-config
+                  key: CORS_ORIGINS
+            # Worker settings
+            - name: WORKER_QUEUE_NAME
+              value: "lidar-processing"
+            - name: WORKER_TIMEOUT
+              value: "1800"
+            # PROJ data path for GDAL/PDAL CRS operations
+            - name: PROJ_DATA
+              value: "/opt/conda/share/proj"
+            - name: PROJ_LIB
+              value: "/opt/conda/share/proj"
+            - name: PROJ_NETWORK
+              value: "ON"
+            - name: PROJ_USER_WRITABLE_DIRECTORY
+              value: "/var/cache/proj"
+          volumeMounts:
+            - name: proj-cache
+              mountPath: /var/cache/proj
+          resources:
+            # Reduced for single-node cluster
+            requests:
+              memory: "512Mi"
+              cpu: "100m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+
+---
+# Service: LIDAR Module API
+apiVersion: v1
+kind: Service
+metadata:
+  name: lidar-api-service
+  namespace: nekazari
+  labels:
+    app: lidar-api
+    component: backend
+    module: lidar
+spec:
+  selector:
+    app: lidar-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lidar-proj-cache-pvc
+  namespace: nekazari
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+

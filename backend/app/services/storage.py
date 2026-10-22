@@ -1,0 +1,359 @@
+"""
+MinIO/S3 Storage Service for LIDAR Module.
+
+Handles uploading and managing 3D Tiles and related assets.
+"""
+
+import logging
+import os
+from typing import Optional, BinaryIO
+from pathlib import Path
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class StorageService:
+    """
+    Service for managing LiDAR assets in MinIO/S3.
+    
+    Handles:
+    - Uploading 3D Tiles directories
+    - Managing tileset.json and .pnts files
+    - Generating public URLs for frontend
+    """
+    
+    def __init__(self):
+        self.client = boto3.client(
+            's3',
+            endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{settings.MINIO_ENDPOINT}",
+            aws_access_key_id=settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.MINIO_SECRET_KEY,
+            config=Config(signature_version='s3v4'),
+            region_name='us-east-1'  # MinIO doesn't care, but boto3 needs it
+        )
+        self.bucket = settings.MINIO_BUCKET
+        self._ensure_bucket()
+        self._sync_bucket_cors()
+    
+    def _ensure_bucket(self):
+        """Ensure the bucket exists."""
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+            logger.debug(f"Bucket {self.bucket} exists")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code in ('404', 'NoSuchBucket'):
+                logger.info(f"Creating bucket {self.bucket}")
+                self.client.create_bucket(Bucket=self.bucket)
+            else:
+                raise
+
+    def _sync_bucket_cors(self) -> None:
+        """
+        Apply strict browser CORS on the tileset bucket (no wildcard origins).
+        Uses the same allowlist as FastAPI (CORS_ORIGINS).
+        """
+        origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+        if not origins:
+            logger.warning("CORS_ORIGINS empty; skip MinIO CORS sync for bucket %s", self.bucket)
+            return
+        try:
+            self.client.put_bucket_cors(
+                Bucket=self.bucket,
+                CORSConfiguration={
+                    "CORSRules": [
+                        {
+                            "ID": "lidar-tilesets-browser",
+                            "AllowedMethods": ["GET", "HEAD", "OPTIONS"],
+                            "AllowedOrigins": origins,
+                            "AllowedHeaders": [
+                                "Range",
+                                "If-None-Match",
+                                "If-Modified-Since",
+                                "Accept",
+                                "Origin",
+                                "Access-Control-Request-Method",
+                                "Access-Control-Request-Headers",
+                            ],
+                            "ExposeHeaders": [
+                                "ETag",
+                                "Content-Length",
+                                "Content-Range",
+                                "Accept-Ranges",
+                                "Last-Modified",
+                            ],
+                            "MaxAgeSeconds": 3600,
+                        },
+                    ],
+                },
+            )
+            logger.info("MinIO bucket CORS applied for %s: %s", self.bucket, origins)
+        except ClientError as exc:
+            logger.warning("MinIO put_bucket_cors failed for %s: %s", self.bucket, exc)
+    
+    def upload_directory(
+        self,
+        local_dir: str,
+        prefix: str,
+        content_type_map: Optional[dict] = None
+    ) -> str:
+        """
+        Upload a directory (e.g., 3D Tiles hierarchy) to storage.
+        
+        Args:
+            local_dir: Local directory path containing files
+            prefix: S3 prefix (folder path) in the bucket
+            content_type_map: Optional mapping of extensions to content types
+        
+        Returns:
+            Public URL to the tileset.json
+        """
+        if content_type_map is None:
+            content_type_map = {
+                '.json': 'application/json',
+                '.pnts': 'application/octet-stream',
+                '.b3dm': 'application/octet-stream',
+                '.i3dm': 'application/octet-stream',
+                '.cmpt': 'application/octet-stream',
+                '.glb': 'model/gltf-binary',
+                '.gltf': 'model/gltf+json',
+            }
+        
+        local_path = Path(local_dir)
+        if not local_path.exists():
+            raise FileNotFoundError(f"Directory not found: {local_dir}")
+        
+        uploaded_files = []
+        
+        for file_path in local_path.rglob('*'):
+            if file_path.is_file():
+                # Calculate relative path for S3 key
+                relative = file_path.relative_to(local_path)
+                s3_key = f"{prefix}/{relative}".replace('\\', '/')
+                
+                # Determine content type
+                ext = file_path.suffix.lower()
+                content_type = content_type_map.get(ext, 'application/octet-stream')
+                
+                # Upload file
+                logger.debug(f"Uploading {file_path} to {s3_key}")
+                self.client.upload_file(
+                    str(file_path),
+                    self.bucket,
+                    s3_key,
+                    ExtraArgs={'ContentType': content_type}
+                )
+                uploaded_files.append(s3_key)
+        
+        logger.info(f"Uploaded {len(uploaded_files)} files to {prefix}")
+        tileset_key = f"{prefix}/tileset.json".replace("\\", "/")
+        return self.get_public_url(tileset_key)
+    
+    def delete_prefix(self, prefix: str, bucket: str = None) -> int:
+        """
+        Delete all objects under a prefix (folder).
+
+        Args:
+            prefix: S3 prefix to delete
+            bucket: Optional bucket name (defaults to self.bucket)
+
+        Returns:
+            Number of objects deleted
+        """
+        target_bucket = bucket or self.bucket
+        paginator = self.client.get_paginator('list_objects_v2')
+
+        deleted_count = 0
+        for page in paginator.paginate(Bucket=target_bucket, Prefix=prefix):
+            if 'Contents' not in page:
+                continue
+
+            objects = [{'Key': obj['Key']} for obj in page['Contents']]
+            if objects:
+                self.client.delete_objects(
+                    Bucket=target_bucket,
+                    Delete={'Objects': objects}
+                )
+                deleted_count += len(objects)
+
+        logger.info(f"Deleted {deleted_count} objects from {prefix}")
+        return deleted_count
+
+    def list_objects(self, bucket: str, prefix: str) -> list:
+        """
+        List objects under a prefix in a bucket.
+
+        Args:
+            bucket: Bucket name
+            prefix: S3 prefix to list
+
+        Returns:
+            List of dicts with key, size, last_modified
+        """
+        paginator = self.client.get_paginator('list_objects_v2')
+        results = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                results.append({
+                    "key": obj["Key"],
+                    "size": obj["Size"],
+                    "last_modified": str(obj["LastModified"]),
+                })
+        return results
+    
+    def get_public_url(self, key: str) -> str:
+        """Get the public URL for an object."""
+        if settings.MINIO_PUBLIC_BASE_URL:
+            base = settings.MINIO_PUBLIC_BASE_URL.rstrip("/")
+            return f"{base}/{self.bucket}/{key}"
+        return f"{settings.TILESET_PUBLIC_URL}/{key}"
+    
+    def file_exists(self, key: str) -> bool:
+        """Check if a file exists in storage."""
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except ClientError:
+            return False
+    
+    def ensure_bucket(self, bucket: str):
+        """Ensure a specific bucket exists (for source tiles cache)."""
+        try:
+            self.client.head_bucket(Bucket=bucket)
+            logger.debug(f"Bucket {bucket} exists")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code in ('404', 'NoSuchBucket'):
+                logger.info(f"Creating bucket {bucket}")
+                self.client.create_bucket(Bucket=bucket)
+            else:
+                raise
+    
+    def download_file(self, bucket: str, key: str, local_path: str):
+        """
+        Download a file from storage to local path.
+        
+        Args:
+            bucket: Bucket name
+            key: Object key in bucket
+            local_path: Local file path to save to
+        """
+        logger.debug(f"Downloading {bucket}/{key} to {local_path}")
+        self.client.download_file(bucket, key, local_path)
+        logger.debug(f"Downloaded to {local_path}")
+    
+    def upload_file(
+        self,
+        bucket: str = None,
+        key: str = None,
+        file_path: str = None,
+        file_obj: 'BinaryIO' = None,
+        content_type: str = 'application/octet-stream'
+    ) -> str:
+        """
+        Upload a file to storage.
+        
+        Args:
+            bucket: Bucket name (defaults to self.bucket)
+            key: S3 key (path in bucket)
+            file_path: Local file path to upload (use this OR file_obj)
+            file_obj: File-like object to upload (use this OR file_path)
+            content_type: MIME type of the file
+        
+        Returns:
+            Public URL to the file
+        """
+        target_bucket = bucket or self.bucket
+        
+        if file_path:
+            self.client.upload_file(
+                file_path,
+                target_bucket,
+                key,
+                ExtraArgs={'ContentType': content_type}
+            )
+        elif file_obj:
+            self.client.upload_fileobj(
+                file_obj,
+                target_bucket,
+                key,
+                ExtraArgs={'ContentType': content_type}
+            )
+        else:
+            raise ValueError("Either file_path or file_obj must be provided")
+        
+        return self.get_public_url(key)
+    
+    def get_file_stream(self, key: str) -> "botocore.response.StreamingBody":
+        """
+        Get a streaming response for a file in the default bucket.
+
+        Args:
+            key: Object key in the bucket
+
+        Returns:
+            StreamingBody that can be iterated over
+
+        Raises:
+            ClientError: If the file does not exist
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"]
+
+    def get_file_bytes(self, key: str) -> bytes:
+        """Get a file from the default bucket as raw bytes.
+
+        Args:
+            key: Object key in the bucket
+
+        Returns:
+            File contents as bytes
+
+        Raises:
+            ClientError: If the file does not exist
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
+
+    def upload_bytes(
+        self,
+        key: str,
+        data: bytes,
+        content_type: str = "application/octet-stream"
+    ) -> str:
+        """Upload raw bytes to the default bucket.
+
+        Args:
+            key: S3 key (path in bucket)
+            data: Raw bytes to upload
+            content_type: MIME type of the data
+
+        Returns:
+            Public URL to the object
+        """
+        from io import BytesIO
+        self.client.upload_fileobj(
+            BytesIO(data),
+            self.bucket,
+            key,
+            ExtraArgs={"ContentType": content_type},
+        )
+        return self.get_public_url(key)
+
+    def file_exists_in_bucket(self, bucket: str, key: str) -> bool:
+        """Check if a file exists in a specific bucket."""
+        try:
+            self.client.head_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError:
+            return False
+
+
+# Singleton instance
+storage_service = StorageService()
+

@@ -1,0 +1,326 @@
+"""Orion-LD client with async support for API handlers and sync fallback for worker/pipeline."""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from urllib.parse import quote
+
+import httpx
+import re
+import os
+
+from app.config import settings
+from app.common.tenant_utils import normalize_tenant_id
+
+logger = logging.getLogger(__name__)
+
+
+def _make_headers(tenant_id: str) -> dict:
+    n = normalize_tenant_id(tenant_id)
+    headers = {
+        "NGSILD-Tenant": n,
+        "Fiware-Service": n,
+        "Fiware-ServicePath": "/",
+        "Accept": "application/ld+json",
+    }
+    ctx = os.getenv("CONTEXT_URL", "")
+    if ctx:
+        headers["Link"] = f'<{ctx}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
+    return headers
+
+
+class OrionLDClient:
+    CONTEXT = [
+        "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld",
+        "https://smartdatamodels.org/context.jsonld",
+    ]
+
+    def __init__(self, tenant_id: Optional[str] = None):
+        self.base_url = settings.ORION_URL.rstrip("/")
+        self.tenant_id = tenant_id
+        if tenant_id:
+            self.headers = _make_headers(tenant_id)
+        else:
+            self.headers = {
+                "Accept": "application/ld+json",
+            }
+        # Override Link with explicit setting if configured
+        if settings.ORION_CONTEXT_URL:
+            link_val = f'<{settings.ORION_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
+            self.headers["Link"] = link_val
+            # Also use the in-cluster platform context in request bodies.
+            # The class default lists smartdatamodels.org, which Orion-LD must
+            # resolve REMOTELY — the Orion pod has no internet egress, so once
+            # its context cache expires every entity POST 504s with
+            # LdContextNotAvailable. The gateway-served platform context is
+            # in-cluster and defines the same SDM terms (plus DigitalAsset).
+            self.CONTEXT = [
+                "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld",
+                settings.ORION_CONTEXT_URL,
+            ]
+
+    async def _request(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None) -> Any:
+        """Async HTTP request to Orion-LD (used by API handlers)."""
+        url = f"{self.base_url}{endpoint}"
+
+        req_headers = dict(self.headers)
+        if json_data and "@context" in json_data:
+            req_headers["Content-Type"] = "application/ld+json"
+            if "Link" in req_headers:
+                del req_headers["Link"]
+        elif json_data:
+            req_headers["Content-Type"] = "application/json"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.request(method, url, json=json_data, headers=req_headers)
+        if resp.status_code not in (200, 201, 204):
+            raise RuntimeError(f"Orion request failed {resp.status_code}: {resp.text}")
+        if resp.content:
+            return resp.json()
+        return None
+
+    def _request_sync(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None) -> Any:
+        """Synchronous HTTP request to Orion-LD (used by worker/pipeline)."""
+        url = f"{self.base_url}{endpoint}"
+
+        req_headers = dict(self.headers)
+        if json_data and "@context" in json_data:
+            req_headers["Content-Type"] = "application/ld+json"
+            if "Link" in req_headers:
+                del req_headers["Link"]
+        elif json_data:
+            req_headers["Content-Type"] = "application/json"
+
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.request(method, url, json=json_data, headers=req_headers)
+        logger.debug(f"[orion-sync] {method} {endpoint} -> {resp.status_code}")
+        if resp.status_code not in (200, 201, 204):
+            raise RuntimeError(f"Orion request failed {resp.status_code}: {resp.text}")
+        if resp.content:
+            return resp.json()
+        return None
+
+    @staticmethod
+    def _parcel_urn(parcel_id: str) -> str:
+        return parcel_id if parcel_id.startswith("urn:") else f"urn:ngsi-ld:AgriParcel:{parcel_id}"
+
+    async def create_processing_job(self, job_id: str, parcel_id: str, geometry_wkt: Optional[str], config: Dict[str, Any], user_id: str) -> str:
+        entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
+        entity = {
+            "@context": self.CONTEXT,
+            "id": entity_id,
+            "type": "DataProcessingJob",
+            "jobType": {"type": "Property", "value": "lidar"},
+            "status": {"type": "Property", "value": "queued"},
+            "progress": {"type": "Property", "value": 0},
+            "statusMessage": {"type": "Property", "value": "queued"},
+            "requestedBy": {"type": "Property", "value": user_id},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "parcelGeometryWKT": {"type": "Property", "value": geometry_wkt or ""},
+            "config": {"type": "Property", "value": config or {}},
+            "createdAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+        }
+        await self._request("POST", "/ngsi-ld/v1/entities", entity)
+        return entity_id
+
+    def create_processing_job_sync(self, job_id: str, parcel_id: str, geometry_wkt: Optional[str], config: Dict[str, Any], user_id: str) -> str:
+        """Synchronous version for worker/pipeline use."""
+        entity_id = f"urn:ngsi-ld:DataProcessingJob:{job_id}"
+        entity = {
+            "@context": self.CONTEXT,
+            "id": entity_id,
+            "type": "DataProcessingJob",
+            "jobType": {"type": "Property", "value": "lidar"},
+            "status": {"type": "Property", "value": "queued"},
+            "progress": {"type": "Property", "value": 0},
+            "statusMessage": {"type": "Property", "value": "queued"},
+            "requestedBy": {"type": "Property", "value": user_id},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+            "parcelGeometryWKT": {"type": "Property", "value": geometry_wkt or ""},
+            "config": {"type": "Property", "value": config or {}},
+            "createdAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+        }
+        self._request_sync("POST", "/ngsi-ld/v1/entities", entity)
+        return entity_id
+
+    async def update_job(self, entity_id: str, **updates: Any) -> None:
+        payload: Dict[str, Any] = {"@context": self.CONTEXT}
+        for k, v in updates.items():
+            payload[k] = {"type": "Property", "value": v}
+        await self._request("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
+
+    def update_job_sync(self, entity_id: str, **updates: Any) -> None:
+        """Synchronous version for worker/pipeline use."""
+        payload: Dict[str, Any] = {"@context": self.CONTEXT}
+        for k, v in updates.items():
+            payload[k] = {"type": "Property", "value": v}
+        self._request_sync("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
+
+    async def get_job(self, entity_id: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
+
+    def get_job_sync(self, entity_id: str) -> Dict[str, Any]:
+        """Synchronous version for worker/pipeline use."""
+        return self._request_sync("GET", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
+
+    async def list_jobs(self, limit: int, offset: int) -> List[Dict[str, Any]]:
+        return (await self._request(
+            "GET",
+            f"/ngsi-ld/v1/entities?type=DataProcessingJob&q=jobType==\"lidar\"&limit={limit}&offset={offset}",
+        )) or []
+
+    async def create_digital_asset(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None, z_min: Optional[float] = None, z_max: Optional[float] = None, vertical_reference: Optional[str] = None, geoid_shift_m: Optional[float] = None, attribution: Optional[str] = None) -> str:
+        entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
+        entity = {
+            "@context": self.CONTEXT,
+            "id": entity_id,
+            "type": "DigitalAsset",
+            "assetCategory": {"type": "Property", "value": "LiDAR"},
+            "resourceURL": {"type": "Property", "value": tileset_url},
+            "source": {"type": "Property", "value": source},
+            "pointCount": {"type": "Property", "value": point_count},
+            "treeCount": {"type": "Property", "value": tree_count},
+            "processingStatus": {"type": "Property", "value": "completed"},
+            "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+        }
+        if dtm_url:
+            entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
+        if dsm_url:
+            entity["dsmUrl"] = {"type": "Property", "value": dsm_url}
+        if chm_url:
+            entity["chmUrl"] = {"type": "Property", "value": chm_url}
+        if classified_laz_url:
+            entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
+        if z_min is not None:
+            entity["zMin"] = {"type": "Property", "value": z_min}
+        if z_max is not None:
+            entity["zMax"] = {"type": "Property", "value": z_max}
+        if vertical_reference:
+            entity["verticalReference"] = {"type": "Property", "value": vertical_reference}
+        if geoid_shift_m is not None:
+            entity["geoidShift"] = {"type": "Property", "value": geoid_shift_m}
+        if attribution:
+            entity["attribution"] = {"type": "Property", "value": attribution}
+        await self._request("POST", "/ngsi-ld/v1/entities", entity)
+        return entity_id
+
+    def create_digital_asset_sync(self, asset_id: str, parcel_id: str, tileset_url: str, source: str, point_count: int, tree_count: int, dtm_url: Optional[str] = None, dsm_url: Optional[str] = None, chm_url: Optional[str] = None, classified_laz_url: Optional[str] = None, z_min: Optional[float] = None, z_max: Optional[float] = None, vertical_reference: Optional[str] = None, geoid_shift_m: Optional[float] = None, attribution: Optional[str] = None) -> str:
+        """Synchronous version for worker/pipeline use."""
+        entity_id = f"urn:ngsi-ld:DigitalAsset:{asset_id}"
+        entity = {
+            "@context": self.CONTEXT,
+            "id": entity_id,
+            "type": "DigitalAsset",
+            "assetCategory": {"type": "Property", "value": "LiDAR"},
+            "resourceURL": {"type": "Property", "value": tileset_url},
+            "source": {"type": "Property", "value": source},
+            "pointCount": {"type": "Property", "value": point_count},
+            "treeCount": {"type": "Property", "value": tree_count},
+            "processingStatus": {"type": "Property", "value": "completed"},
+            "dateObserved": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+            "hasAgriParcel": {"type": "Relationship", "object": self._parcel_urn(parcel_id)},
+        }
+        if dtm_url:
+            entity["dtmUrl"] = {"type": "Property", "value": dtm_url}
+        if dsm_url:
+            entity["dsmUrl"] = {"type": "Property", "value": dsm_url}
+        if chm_url:
+            entity["chmUrl"] = {"type": "Property", "value": chm_url}
+        if classified_laz_url:
+            entity["classifiedLazUrl"] = {"type": "Property", "value": classified_laz_url}
+        if z_min is not None:
+            entity["zMin"] = {"type": "Property", "value": z_min}
+        if z_max is not None:
+            entity["zMax"] = {"type": "Property", "value": z_max}
+        if vertical_reference:
+            entity["verticalReference"] = {"type": "Property", "value": vertical_reference}
+        if geoid_shift_m is not None:
+            entity["geoidShift"] = {"type": "Property", "value": geoid_shift_m}
+        if attribution:
+            entity["attribution"] = {"type": "Property", "value": attribution}
+        logger.debug(f"[orion-sync] creating DigitalAsset {entity_id} tenant={self.tenant_id} ctx={self.CONTEXT[1] if len(self.CONTEXT) > 1 else self.CONTEXT}")
+        self._request_sync("POST", "/ngsi-ld/v1/entities", entity)
+        logger.debug(f"[orion-sync] created DigitalAsset {entity_id}")
+        return entity_id
+
+    async def list_assets(self, parcel_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        q = 'assetCategory=="LiDAR"'
+        if parcel_id:
+            q += f';hasAgriParcel=="{self._parcel_urn(parcel_id)}"'
+        return (await self._request("GET", f"/ngsi-ld/v1/entities?type=DigitalAsset&q={q}&limit=1000")) or []
+
+    async def get_asset(self, entity_id: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
+
+    async def delete_asset(self, entity_id: str) -> None:
+        await self._request("DELETE", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}")
+
+    async def cancel_job(self, entity_id: str) -> None:
+        payload = {
+            "@context": self.CONTEXT,
+            "status": {"type": "Property", "value": "cancelled"},
+            "completedAt": {"type": "Property", "value": datetime.utcnow().isoformat() + "Z"},
+            "statusMessage": {"type": "Property", "value": "Cancelled by user"},
+        }
+        await self._request("POST", f"/ngsi-ld/v1/entities/{quote(entity_id, safe='')}/attrs", payload)
+
+    # ── VegetationIndex (NDVI raster) cross-module integration ────────
+
+    def get_latest_ndvi_raster(self, parcel_id: str) -> Optional[str]:
+        """Query Orion for the most recent NDVI raster URL for a parcel.
+
+        Vegetation-health publishes VegetationIndex entities with
+        rasterURL, sensingDate, and hasAgriParcel. This method returns
+        the rasterURL of the latest completed analysis, converted from
+        S3 to HTTP URL for use as PDAL colorization source.
+
+        Returns None when no VegetationIndex exists for the parcel.
+        """
+        parcel_urn = self._parcel_urn(parcel_id)
+        q = f'hasAgriParcel=="{parcel_urn}";productType=="NDVI"'
+        try:
+            entities = self._request_sync(
+                "GET",
+                f"/ngsi-ld/v1/entities?type=EOProduct&q={q}&limit=10&options=keyValues",
+            ) or []
+        except Exception:
+            logger.warning("Failed to query EOProduct for parcel %s", parcel_id)
+            return None
+
+        if not entities:
+            return None
+
+        # Pick the most recent by sensingDate
+        best = None
+        best_date = ""
+        for e in (entities if isinstance(entities, list) else [entities]):
+            sd = e.get("sensingDate", "")
+            if sd > best_date:
+                best_date = sd
+                best = e
+
+        if not best:
+            return None
+
+        raster_url = best.get("rasterURL", "")
+        if not raster_url:
+            return None
+
+        # Convert S3 URL to HTTP URL (MinIO public endpoint)
+        # s3://bucket/path -> <MINIO_PUBLIC_BASE_URL>/bucket/path
+        if raster_url.startswith("s3://"):
+            path = raster_url[5:]  # remove "s3://"
+            bucket, _, key = path.partition("/")
+            minio_public = settings.MINIO_PUBLIC_BASE_URL.rstrip("/")
+            raster_url = f"{minio_public}/{bucket}/{key}"
+
+        logger.info(
+            "Found latest NDVI raster for parcel %s (sensing %s): %s",
+            parcel_id, best_date, raster_url,
+        )
+        return raster_url
+
+
+def get_orion_client(tenant_id: Optional[str] = None) -> OrionLDClient:
+    return OrionLDClient(tenant_id=tenant_id)
