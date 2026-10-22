@@ -24,6 +24,7 @@ from rq.job import Job
 from rq.registry import FailedJobRegistry
 
 from app.config import settings
+from app.services.redact_url import redact_url_credentials
 
 
 class NoMaintenanceWorker(Worker):
@@ -194,7 +195,7 @@ def create_redis_connection() -> Redis:
 def run_worker():
     """Start the RQ worker."""
     logger.info("Starting LIDAR processing worker...")
-    logger.info(f"Redis URL: {settings.REDIS_URL}")
+    logger.info("Redis URL: %s", redact_url_credentials(settings.REDIS_URL))
     logger.info(f"Queue: {settings.WORKER_QUEUE_NAME}")
 
     redis_conn = create_redis_connection()
