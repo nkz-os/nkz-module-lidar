@@ -8,28 +8,11 @@
  * - window.__nekazariViewerContext.useViewer() - Viewer state hook
  * - window.__nekazariAuth / __nekazariAuthContext - Authentication state
  * - window.__nekazariUIKit - UI Kit components
- * - window.__nekazariI18n - i18n context
  */
 
 import { createContext, useContext, type Context } from 'react';
 import type { ViewerHookResult } from '../types';
 
-// Import locale files for standalone fallback
-import esLocale from '../locales/es.json';
-import enLocale from '../locales/en.json';
-import euLocale from '../locales/eu.json';
-import caLocale from '../locales/ca.json';
-import frLocale from '../locales/fr.json';
-import ptLocale from '../locales/pt.json';
-
-const locales: Record<string, Record<string, string>> = {
-  es: esLocale,
-  en: enLocale,
-  eu: euLocale,
-  ca: caLocale,
-  fr: frLocale,
-  pt: ptLocale,
-};
 
 // Re-export types
 export type { ViewerHookResult as ViewerContextValue } from '../types';
@@ -96,55 +79,7 @@ export function useAuth() {
 }
 
 /**
- * Access translation function from the host application.
- * Falls back to local JSON files if host i18n is unavailable (standalone mode).
+ * Translation hook bound to the host's shared i18next instance (namespace `lidar`,
+ * registered in ../i18n.ts), so the module follows the language the user picked.
  */
-export function useTranslation(_namespace?: string) {
-  // Try host's i18n context first
-  const hostI18n = window.__nekazariI18n;
-  if (hostI18n) {
-    return {
-      t: (key: string, params?: Record<string, string | number>) => {
-        let result = hostI18n.t(`lidar.${key}`, params as Record<string, string>);
-        // If host returned the full key, it doesn't have our namespace — use local
-        if (result === `lidar.${key}`) {
-          result = localTranslate(hostI18n.i18n.language, key, params);
-        }
-        return result;
-      },
-      i18n: hostI18n.i18n,
-    };
-  }
-
-  // Standalone mode: use local locale files
-  const lang = detectLanguage();
-  return {
-    t: (key: string, params?: Record<string, string | number>) =>
-      localTranslate(lang, key, params),
-    i18n: { language: lang },
-  };
-}
-
-function detectLanguage(): string {
-  // Check localStorage, then navigator
-  const stored = localStorage.getItem('i18nextLng');
-  if (stored && locales[stored]) return stored;
-  const nav = navigator.language?.split('-')[0];
-  if (nav && locales[nav]) return nav;
-  return 'es';
-}
-
-function localTranslate(
-  lang: string,
-  key: string,
-  params?: Record<string, string | number>
-): string {
-  const dict = locales[lang] ?? locales['es'];
-  let value = dict[key] ?? locales['es'][key] ?? key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      value = value.replace(`{{${k}}}`, String(v));
-    }
-  }
-  return value;
-}
+export { useTranslation } from '@nekazari/sdk';
