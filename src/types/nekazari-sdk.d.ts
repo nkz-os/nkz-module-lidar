@@ -41,6 +41,18 @@ declare module '@nekazari/sdk' {
 
   export function useTranslation(namespace?: string): TranslationContextValue;
 
+  /** The host's shared i18next instance. */
+  export const i18n: {
+    language: string;
+    addResourceBundle(
+      lng: string,
+      ns: string,
+      resources: Record<string, unknown>,
+      deep?: boolean,
+      overwrite?: boolean,
+    ): unknown;
+  };
+
   export interface ViewerContextValue {
     selectedEntityId: string | null;
     selectedEntityType: string | null;
