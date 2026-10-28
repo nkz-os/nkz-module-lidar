@@ -22,6 +22,7 @@ import {
   Database,
   Trash2,
   MoveVertical,
+  Plus,
 } from 'lucide-react';
 import { SlotShell } from '@nekazari/viewer-kit';
 import {
@@ -76,6 +77,10 @@ const LidarLayerControl: React.FC = () => {
   // Use local ID as override for the UI logic
   const selectedEntityId = localEntityId || context.selectedEntityId;
 
+  useEffect(() => {
+    setAddingLayer(false);
+  }, [selectedEntityId]);
+
   const {
     selectedEntityGeometry,
     isLoadingMetadata,
@@ -106,6 +111,8 @@ const LidarLayerControl: React.FC = () => {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  // With a layer already active, the upload/PNOA options open on demand.
+  const [addingLayer, setAddingLayer] = useState(false);
   const [deletingLayerId, setDeletingLayerId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [manualCrs, setManualCrs] = useState('');
@@ -199,6 +206,7 @@ const LidarLayerControl: React.FC = () => {
     try {
       setErrorWithTimeout(null);
       await startProcessing();
+      setAddingLayer(false);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('errorProcessing');
       setErrorWithTimeout(msg);
@@ -267,6 +275,7 @@ const LidarLayerControl: React.FC = () => {
 
       if (finalStatus.tileset_url) {
         await refreshLayers();
+        setAddingLayer(false);
       }
       setUploadJobStatus(null);
       setRequiresManualCrs(false);
@@ -561,12 +570,20 @@ const LidarLayerControl: React.FC = () => {
               >
                 {t('refreshLayers')}
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAddingLayer((open) => !open)}
+                leadingIcon={addingLayer ? <XCircle className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              >
+                {addingLayer ? t('cancelAddLayer') : t('addLayer')}
+              </Button>
             </Stack>
           </div>
         )}
 
-        {/* Source Options (when no active layer) */}
-        {!activeTilesetUrl && !isProcessing && (
+        {/* Source Options (no active layer yet, or adding another one) */}
+        {(!activeTilesetUrl || addingLayer) && !isProcessing && (
           <Stack gap="stack">
             {/* Coverage Badge */}
             {hasCoverage !== null && (

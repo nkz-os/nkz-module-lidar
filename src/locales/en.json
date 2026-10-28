@@ -106,5 +106,7 @@
   "autoFitApplied": "Set to {{value}} m",
   "autoFitNoLayer": "Show the LiDAR layer first to fit it to the terrain",
   "autoFitNoTerrain": "No elevation layer active in the viewer",
-  "autoFitFailed": "Could not auto-fit the height"
+  "autoFitFailed": "Could not auto-fit the height",
+  "addLayer": "Add layer",
+  "cancelAddLayer": "Cancel"
 }
