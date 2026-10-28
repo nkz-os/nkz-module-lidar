@@ -81,6 +81,7 @@ const LidarLayerControl: React.FC = () => {
 
   useEffect(() => {
     setAddingLayer(false);
+    setManualDownload(null);
   }, [selectedEntityId]);
 
   const {
@@ -635,7 +636,7 @@ const LidarLayerControl: React.FC = () => {
         )}
 
         {/* Source Options (no active layer yet, or adding another one) */}
-        {(!activeTilesetUrl || addingLayer) && !isProcessing && (
+        {(!activeTilesetUrl || addingLayer || manualDownload) && !isProcessing && (
           <Stack gap="stack">
             {/* Coverage Badge */}
             {hasCoverage !== null && (

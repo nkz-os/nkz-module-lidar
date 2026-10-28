@@ -177,15 +177,17 @@ class PNOADownloader:
                 logger.warning("[PNOA] search %s -> %s", cod_serie, resp.status_code)
                 return []
             html = resp.text
-            secs = _DATA_SEC_RE.findall(html)
-            names = _LAZ_NAME_RE.findall(html)
-            for i, sec in enumerate(secs):
-                if len(names) == len(secs):
-                    found[sec] = names[i]
-                elif len(secs) == 1 and names:
-                    found[sec] = names[0]
-                else:
-                    found[sec] = None
+            # One result row per tile. A name is only trusted when its own row
+            # carries exactly one sec and exactly one distinct LAZ name (a row
+            # listing e.g. IRC and RGB files is ambiguous -> no name).
+            for row in re.split(r"(?i)<tr\b", html):
+                secs = _DATA_SEC_RE.findall(row)
+                if not secs:
+                    continue
+                names = set(_LAZ_NAME_RE.findall(row))
+                name = next(iter(names)) if len(secs) == 1 and len(names) == 1 else None
+                for sec in secs:
+                    found[sec] = name
         except requests.RequestException as exc:
             logger.warning("[PNOA] search %s failed: %s", cod_serie, exc)
         return list(found.items())

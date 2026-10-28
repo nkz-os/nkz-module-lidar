@@ -214,6 +214,10 @@ class LidarPipeline:
                 status="failed",
                 progress=0,
                 statusMessage=MANUAL_DOWNLOAD_CODE,
+                errorMessage=(
+                    "CNIG requires a human to download; use the links to "
+                    "download the LAZ and upload it"
+                ),
                 manualDownloadLinks=e.links,
                 completedAt=datetime.utcnow().isoformat() + "Z",
             )

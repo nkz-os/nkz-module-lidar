@@ -42,6 +42,22 @@ def _walled_post(url, **kwargs):
     return MagicMock(status_code=403)  # descargaDir behind the captcha
 
 
+class TestRowPairing:
+    HTML = (
+        "<table>"
+        '<tr><td>PNOA-A-IRC.LAZ</td><td>PNOA-A-RGB.LAZ</td><td data-sec="1"></td></tr>'
+        '<tr><td>PNOA-B.LAZ</td><td data-sec="2"></td></tr>'
+        '<tr><td data-sec="3"></td></tr>'
+        "</table>"
+    )
+
+    def test_names_only_when_row_is_unambiguous(self, dl):
+        resp = MagicMock(status_code=200, text=self.HTML)
+        with patch.object(dl.session, "post", return_value=resp):
+            tiles = dict(dl._search_tiles(1.0, 41.0, "LIDA3"))
+        assert tiles == {"1": None, "2": "PNOA-B.LAZ", "3": None}
+
+
 class TestDownloaderWall:
     def test_403_raises_with_exact_links(self, dl, tmp_path):
         with patch.object(dl.session, "post", side_effect=_walled_post):
@@ -158,6 +174,7 @@ class TestPipeline:
         assert kwargs["status"] == "failed"
         assert kwargs["statusMessage"] == "manual_download_required"
         assert kwargs["manualDownloadLinks"] == links
+        assert "human" in kwargs["errorMessage"]
 
 
 def _job(links_key, links):
@@ -222,6 +239,15 @@ class TestWorker:
             "statusMessage": {"type": "Property", "value": "manual_download_required"}}
         monkeypatch.setattr("app.services.orion_client.get_orion_client", lambda t: client)
         worker._sync_orion_failure(self._job(), "ManualDownloadRequired: x")
+        client.update_job_sync.assert_not_called()
+
+    def test_sync_reads_iri_form(self, monkeypatch):
+        from app import worker
+        client = MagicMock()
+        client.get_job_sync.return_value = {
+            "https://nkz-os.org/ns/statusMessage": {"value": "manual_download_required"}}
+        monkeypatch.setattr("app.services.orion_client.get_orion_client", lambda t: client)
+        worker._sync_orion_failure(self._job(), "x")
         client.update_job_sync.assert_not_called()
 
     def test_sync_still_marks_other_failures(self, monkeypatch):

@@ -109,7 +109,12 @@ def _mark_orion_job_failed(job_entity_id: str, tenant_id: str, error_message: st
     # user-facing links; do not replace it with a generic failure.
     try:
         current = client.get_job_sync(job_entity_id) or {}
-        current_msg = (current.get("statusMessage") or {}).get("value")
+        current_msg = None
+        for key in ("statusMessage", "https://nkz-os.org/ns/statusMessage", "nkz:statusMessage"):
+            attr = current.get(key)
+            if isinstance(attr, dict) and "value" in attr:
+                current_msg = attr["value"]
+                break
     except Exception:
         current_msg = None
     if current_msg == "manual_download_required":
