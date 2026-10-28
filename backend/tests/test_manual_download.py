@@ -13,7 +13,7 @@ from app.services.pnoa_downloader import (
 )
 
 POINT_WKT = "POLYGON((-2.1 42.6, -2.0 42.6, -2.0 42.7, -2.1 42.7, -2.1 42.6))"
-LINK_URL = "https://centrodedescargas.cnig.es/CentroDescargas/detalleArchivo?sec=111"
+LINK_URL = f"{BASE_URL}/detalleArchivo?sec=111"
 
 
 @pytest.fixture

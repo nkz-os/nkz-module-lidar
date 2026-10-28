@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from botocore.exceptions import ClientError
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -23,6 +25,7 @@ from app.services.lidar_pipeline import process_lidar_job, process_uploaded_file
 from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_crs
 from app.services.orion_client import get_orion_client
 from app.services.pnoa_indexer import PNOAIndexer
+from app.services.pnoa_downloader import BASE_URL as CNIG_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +168,8 @@ def get_redis_queue() -> Queue:
 
 _NKZ_NS = "https://nkz-os.org/ns/"
 KNOWN_ERROR_CODES = {"manual_download_required"}
-CNIG_LINK_PREFIX = "https://centrodedescargas.cnig.es/"
+# Links must point at the CNIG host the downloader already talks to (single source).
+CNIG_LINK_PREFIX = urlsplit(CNIG_BASE_URL)._replace(path="/", query="", fragment="").geturl()
 
 
 def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
