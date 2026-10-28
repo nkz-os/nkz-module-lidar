@@ -106,5 +106,7 @@
   "autoFitApplied": "Ajusté à {{value}} m",
   "autoFitNoLayer": "Affichez d'abord la couche LiDAR pour l'ajuster au terrain",
   "autoFitNoTerrain": "Aucune couche d'élévation active dans la vue",
-  "autoFitFailed": "Impossible d'ajuster la hauteur automatiquement"
+  "autoFitFailed": "Impossible d'ajuster la hauteur automatiquement",
+  "addLayer": "Ajouter une couche",
+  "cancelAddLayer": "Annuler"
 }

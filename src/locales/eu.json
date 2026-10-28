@@ -106,5 +106,7 @@
   "autoFitApplied": "{{value}} m-tara doitu da",
   "autoFitNoLayer": "Erakutsi lehenik LiDAR geruza lurrera doitzeko",
   "autoFitNoTerrain": "Ez dago altuera-geruza aktiborik ikustailean",
-  "autoFitFailed": "Ezin izan da altuera automatikoki doitu"
+  "autoFitFailed": "Ezin izan da altuera automatikoki doitu",
+  "addLayer": "Gehitu geruza",
+  "cancelAddLayer": "Utzi"
 }

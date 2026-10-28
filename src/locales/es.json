@@ -106,5 +106,7 @@
   "autoFitApplied": "Ajustado a {{value}} m",
   "autoFitNoLayer": "Muestra primero la capa LiDAR para ajustarla al terreno",
   "autoFitNoTerrain": "No hay capa de elevación activa en el visor",
-  "autoFitFailed": "No se pudo ajustar automáticamente la altura"
+  "autoFitFailed": "No se pudo ajustar automáticamente la altura",
+  "addLayer": "Añadir capa",
+  "cancelAddLayer": "Cancelar"
 }
