@@ -83,6 +83,12 @@ class TestInit:
         policy = json.loads(base64.b64decode(d["fields"]["policy"]))
         assert ["content-length-range", 1, MAX] in policy["conditions"]
         assert {"key": d["fields"]["key"]} in policy["conditions"]
+        assert {"Content-Type": "application/octet-stream"} in policy["conditions"]
+        assert d["fields"]["Content-Type"] == "application/octet-stream"
+
+    def test_init_ensures_bucket(self, env):
+        init(env)
+        env.storage.ensure_bucket.assert_called_with("lidar-source-tiles")
 
     def test_las_extension_ok_case_insensitive(self, env):
         d = init(env, filename="A.LAS").json()
@@ -140,9 +146,27 @@ class TestComplete:
         env.inspect.side_effect = GeodesyValidationError("CRS missing")
         r = complete(env, str(uuid4()))
         assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "crs_invalid"
         env.queue.enqueue.assert_not_called()
         env.orion.create_processing_job.assert_not_called()
         env.storage.client.delete_object.assert_not_called()
+
+    def test_missing_crs_code(self, env):
+        from app.services.geodesy_validator import GeodesyValidationError
+        env.inspect.side_effect = GeodesyValidationError("CRS_MISSING")
+        d = complete(env, str(uuid4())).json()["detail"]
+        assert d["code"] == "crs_required"
+
+    def test_invalid_geometry_has_own_code(self, env):
+        r = complete(env, str(uuid4()), geometry_wkt="POINT(1 1)")
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "invalid_geometry"
+
+    def test_orion_error_other_than_404_is_503(self, env):
+        env.orion.get_job = AsyncMock(side_effect=RuntimeError("Orion request failed 500: x"))
+        r = complete(env, str(uuid4()))
+        assert r.status_code == 503
+        env.queue.enqueue.assert_not_called()
 
     def test_retry_with_source_crs_passes_override(self, env):
         r = complete(env, str(uuid4()), source_crs="EPSG:25830")

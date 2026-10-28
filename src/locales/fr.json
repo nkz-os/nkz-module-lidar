@@ -60,6 +60,8 @@
   "errorUpload": "Erreur lors de l'import du fichier",
   "uploadingPercent": "Import en cours {{percent}} %",
   "errorStorageUpload": "Impossible d'envoyer le fichier vers le stockage",
+  "uploadedNeedsCrs": "Le fichier est déjà envoyé ; indiquez le système de coordonnées et réessayez",
+  "retryWithCrs": "Réessayer avec ce CRS",
   "errorMissingCrs": "Métadonnées CRS manquantes. Entrez l'EPSG source avant de télécharger.",
   "manualCrsLabel": "CRS source (obligatoire si le LAZ n'a pas de projection)",
   "deleteLayer": "Supprimer la couche",

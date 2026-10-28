@@ -116,6 +116,11 @@ export class ApiError extends Error {
         this.status = status;
         this.detail = detail;
     }
+    /** Machine code from a structured `detail` ({code, message}), if any. */
+    get code(): string | undefined {
+        const d = this.detail as { code?: unknown } | undefined;
+        return d && typeof d === 'object' && typeof d.code === 'string' ? d.code : undefined;
+    }
 }
 
 export interface DirectUploadInit {
@@ -171,8 +176,15 @@ class LidarApiClient {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             const detail = errorData.detail;
+            const structured = detail && typeof detail === 'object'
+                ? (detail as { message?: unknown }).message
+                : undefined;
             throw new ApiError(
-                typeof detail === 'string' && detail ? detail : `API error: ${response.status}`,
+                typeof detail === 'string' && detail
+                    ? detail
+                    : typeof structured === 'string' && structured
+                        ? structured
+                        : `API error: ${response.status}`,
                 response.status,
                 detail,
             );

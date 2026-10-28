@@ -60,6 +60,8 @@
   "errorUpload": "Error uploading file",
   "uploadingPercent": "Uploading {{percent}} %",
   "errorStorageUpload": "Could not upload the file to storage",
+  "uploadedNeedsCrs": "The file is already uploaded; enter the coordinate system and retry",
+  "retryWithCrs": "Retry with this CRS",
   "errorMissingCrs": "Missing CRS metadata. Enter source EPSG before upload.",
   "manualCrsLabel": "Source CRS (required if LAZ has no projection metadata)",
   "deleteLayer": "Delete layer",

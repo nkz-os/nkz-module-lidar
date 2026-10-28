@@ -1,5 +1,6 @@
 """LIDAR API endpoints backed by Orion-LD entities."""
 
+import asyncio
 import json
 import logging
 import os
@@ -766,7 +767,9 @@ async def init_direct_upload(
         raise HTTPException(status_code=503, detail="direct_upload_unavailable")
 
     from app.services.direct_upload import DIRECT_UPLOAD_EXPIRES_S, presign_upload_post
+    from app.services.storage import storage_service
 
+    storage_service.ensure_bucket(UPLOAD_BUCKET)
     upload_id = str(uuid4())
     key = f"user_uploads/{tenant_id}/{upload_id}/upload.{ext}"
     signed = presign_upload_post(UPLOAD_BUCKET, key, settings.MAX_UPLOAD_SIZE)
@@ -823,7 +826,10 @@ async def complete_direct_upload(
     try:
         geometry_wkt = validate_crop_geometry(body.geometry_wkt)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_geometry", "message": str(e)},
+        )
 
     from app.services.storage import storage_service
 
@@ -840,11 +846,13 @@ async def complete_direct_upload(
         storage_service.client.delete_object(Bucket=UPLOAD_BUCKET, Key=s3_key)
         raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
 
-    # Idempotency: the job id equals the upload id.
+    # Idempotency: the job id equals the upload id. Only a 404 means "no job".
     try:
         await get_orion_client(tenant_id).get_job(f"urn:ngsi-ld:DataProcessingJob:{upload_id}")
-    except Exception:
-        pass  # no job yet
+    except Exception as e:
+        if " 404" not in str(e):
+            logger.error(f"Orion error checking job {upload_id}: {e}")
+            raise HTTPException(status_code=503, detail="Job store unavailable. Please try again later.")
     else:
         raise HTTPException(
             status_code=409,
@@ -855,10 +863,12 @@ async def complete_direct_upload(
     with tempfile.TemporaryDirectory(prefix="lidar_upload_") as temp_dir:
         local_path = os.path.join(temp_dir, f"upload.{file_ext}")
         try:
-            storage_service.client.download_file(UPLOAD_BUCKET, s3_key, local_path)
-            inspect_laz_crs(local_path, source_crs_override=body.source_crs)
+            await asyncio.to_thread(storage_service.client.download_file, UPLOAD_BUCKET, s3_key, local_path)
+            await asyncio.to_thread(inspect_laz_crs, local_path, source_crs_override=body.source_crs)
         except GeodesyValidationError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            msg = str(e)
+            code = "crs_required" if msg.startswith("CRS_MISSING") else "crs_invalid"
+            raise HTTPException(status_code=422, detail={"code": code, "message": msg})
 
     return await _create_upload_job(
         job_id=upload_id,

@@ -60,6 +60,8 @@
   "errorUpload": "Erro ao carregar ficheiro",
   "uploadingPercent": "A carregar {{percent}} %",
   "errorStorageUpload": "Não foi possível carregar o ficheiro para o armazenamento",
+  "uploadedNeedsCrs": "O ficheiro já foi carregado; indique o sistema de coordenadas e tente novamente",
+  "retryWithCrs": "Tentar novamente com este CRS",
   "errorMissingCrs": "Metadados CRS em falta. Introduza o EPSG de origem antes de carregar.",
   "manualCrsLabel": "CRS de origem (obrigatório se o LAZ não tiver projeção)",
   "deleteLayer": "Eliminar camada",

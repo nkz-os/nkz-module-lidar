@@ -60,6 +60,8 @@
   "errorUpload": "Error en pujar l'arxiu",
   "uploadingPercent": "Pujant {{percent}} %",
   "errorStorageUpload": "No s'ha pogut pujar l'arxiu a l'emmagatzematge",
+  "uploadedNeedsCrs": "L'arxiu ja està pujat; indica el sistema de coordenades i reintenta",
+  "retryWithCrs": "Reintentar amb aquest CRS",
   "errorMissingCrs": "Falten metadades CRS. Introdueix l'EPSG d'origen abans de pujar.",
   "manualCrsLabel": "CRS d'origen (obligatori si el LAZ no té projecció)",
   "deleteLayer": "Eliminar capa",

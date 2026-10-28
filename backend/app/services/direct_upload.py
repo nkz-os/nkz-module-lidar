@@ -31,9 +31,10 @@ def presign_upload_post(bucket: str, key: str, max_size: int) -> Dict[str, Any]:
     return client.generate_presigned_post(
         Bucket=bucket,
         Key=key,
-        Fields={"key": key},
+        Fields={"key": key, "Content-Type": "application/octet-stream"},
         Conditions=[
             {"key": key},
+            {"Content-Type": "application/octet-stream"},
             ["content-length-range", 1, max_size],
         ],
         ExpiresIn=DIRECT_UPLOAD_EXPIRES_S,
