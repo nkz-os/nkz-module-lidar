@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "No hi ha capa d'elevació activa al visor",
   "autoFitFailed": "No s'ha pogut ajustar l'alçada automàticament",
   "addLayer": "Afegeix una capa",
-  "cancelAddLayer": "Cancel·la"
+  "cancelAddLayer": "Cancel·la",
+  "manualDownload.title": "Cal una descàrrega manual",
+  "manualDownload.body": "El CNIG ara exigeix verificació humana per descarregar. Obre el full, prem «Descarregar» i puja aquí el fitxer LAZ.",
+  "manualDownload.tile": "Full {{sec}}",
+  "manualDownload.upload": "Puja el LAZ descarregat",
+  "manualDownload.dismiss": "Tanca"
 }

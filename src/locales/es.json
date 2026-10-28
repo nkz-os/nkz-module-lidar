@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "No hay capa de elevación activa en el visor",
   "autoFitFailed": "No se pudo ajustar automáticamente la altura",
   "addLayer": "Añadir capa",
-  "cancelAddLayer": "Cancelar"
+  "cancelAddLayer": "Cancelar",
+  "manualDownload.title": "Descarga manual necesaria",
+  "manualDownload.body": "El CNIG exige ahora verificación humana para descargar. Abre la hoja, pulsa «Descargar» y sube aquí el archivo LAZ.",
+  "manualDownload.tile": "Hoja {{sec}}",
+  "manualDownload.upload": "Subir el LAZ descargado",
+  "manualDownload.dismiss": "Cerrar"
 }

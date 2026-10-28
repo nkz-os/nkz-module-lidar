@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "Ez dago altuera-geruza aktiborik ikustailean",
   "autoFitFailed": "Ezin izan da altuera automatikoki doitu",
   "addLayer": "Gehitu geruza",
-  "cancelAddLayer": "Utzi"
+  "cancelAddLayer": "Utzi",
+  "manualDownload.title": "Eskuzko deskarga behar da",
+  "manualDownload.body": "CNIGek giza egiaztapena eskatzen du orain deskargatzeko. Ireki orria, sakatu «Deskargatu» eta igo hemen LAZ fitxategia.",
+  "manualDownload.tile": "{{sec}} orria",
+  "manualDownload.upload": "Igo deskargatutako LAZ-a",
+  "manualDownload.dismiss": "Itxi"
 }

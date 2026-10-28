@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "No elevation layer active in the viewer",
   "autoFitFailed": "Could not auto-fit the height",
   "addLayer": "Add layer",
-  "cancelAddLayer": "Cancel"
+  "cancelAddLayer": "Cancel",
+  "manualDownload.title": "Manual download needed",
+  "manualDownload.body": "CNIG now requires human verification to download. Open the tile page, press “Download” and upload the LAZ file here.",
+  "manualDownload.tile": "Tile {{sec}}",
+  "manualDownload.upload": "Upload the downloaded LAZ",
+  "manualDownload.dismiss": "Close"
 }

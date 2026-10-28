@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "Aucune couche d'élévation active dans la vue",
   "autoFitFailed": "Impossible d'ajuster la hauteur automatiquement",
   "addLayer": "Ajouter une couche",
-  "cancelAddLayer": "Annuler"
+  "cancelAddLayer": "Annuler",
+  "manualDownload.title": "Téléchargement manuel requis",
+  "manualDownload.body": "Le CNIG exige désormais une vérification humaine pour télécharger. Ouvrez la fiche, cliquez sur « Télécharger » et déposez ici le fichier LAZ.",
+  "manualDownload.tile": "Dalle {{sec}}",
+  "manualDownload.upload": "Importer le LAZ téléchargé",
+  "manualDownload.dismiss": "Fermer"
 }
