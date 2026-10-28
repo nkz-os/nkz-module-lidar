@@ -107,6 +107,33 @@ export interface DetectedTree {
 // API Client Class
 // ============================================================================
 
+export class ApiError extends Error {
+    status: number;
+    detail: unknown;
+    constructor(message: string, status: number, detail?: unknown) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.detail = detail;
+    }
+}
+
+export interface DirectUploadInit {
+    upload_id: string;
+    url: string;
+    fields: Record<string, string>;
+    expires_in: number;
+}
+
+export interface CompleteUploadParams {
+    parcel_id: string;
+    geometry_wkt?: string;
+    config?: Record<string, unknown>;
+    source_crs?: string;
+    classification_mode?: string;
+    has_rgb?: boolean;
+}
+
 class LidarApiClient {
     private baseUrl: string;
 
@@ -143,7 +170,12 @@ class LidarApiClient {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || `API error: ${response.status}`);
+            const detail = errorData.detail;
+            throw new ApiError(
+                typeof detail === 'string' && detail ? detail : `API error: ${response.status}`,
+                response.status,
+                detail,
+            );
         }
 
         return response.json();
@@ -305,6 +337,86 @@ class LidarApiClient {
         }
 
         return response.json();
+    }
+
+    /**
+     * Step 1 of the direct upload: ask for a signed form. Throws ApiError with
+     * detail 'direct_upload_unavailable' (503) when the deployment has no
+     * public storage URL; callers then fall back to uploadFile().
+     */
+    async initUpload(parcelId: string, filename: string, sizeBytes: number): Promise<DirectUploadInit> {
+        return this.request('/uploads/init', {
+            method: 'POST',
+            body: JSON.stringify({ parcel_id: parcelId, filename, size_bytes: sizeBytes }),
+        });
+    }
+
+    /**
+     * Step 2: POST the file straight to object storage with the signed form.
+     * XHR (not fetch) for upload progress. No credentials: the signature authorizes.
+     */
+    uploadToStorage(
+        init: DirectUploadInit,
+        file: File,
+        onProgress?: (loaded: number, total: number) => void,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const form = new FormData();
+            Object.entries(init.fields).forEach(([k, v]) => form.append(k, v));
+            form.append('file', file); // must be the last field
+            xhr.open('POST', init.url);
+            xhr.withCredentials = false;
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) onProgress?.(ev.loaded, ev.total);
+            };
+            xhr.onload = () => {
+                if (xhr.status === 200 || xhr.status === 201 || xhr.status === 204) {
+                    resolve();
+                    return;
+                }
+                const xml = xhr.responseText || '';
+                const code = /<Code>([^<]*)<\/Code>/.exec(xml)?.[1];
+                const msg = /<Message>([^<]*)<\/Message>/.exec(xml)?.[1];
+                const detail = [code, msg].filter(Boolean).join(': ');
+                reject(new ApiError(
+                    `Storage upload failed (${xhr.status})${detail ? `: ${detail}` : ''}`,
+                    xhr.status,
+                    detail || undefined,
+                ));
+            };
+            xhr.onerror = () => reject(new ApiError('Storage upload failed: network error', 0));
+            xhr.onabort = () => reject(new DOMException('Upload aborted', 'AbortError'));
+            if (signal) {
+                if (signal.aborted) {
+                    reject(new DOMException('Upload aborted', 'AbortError'));
+                    return;
+                }
+                signal.addEventListener('abort', () => xhr.abort(), { once: true });
+            }
+            xhr.send(form);
+        });
+    }
+
+    /**
+     * Step 3: validate the uploaded object and start processing. Safe to call
+     * again with source_crs after a 422 (the object is kept server-side).
+     * A 409 means the job already exists: its id is returned.
+     */
+    async completeUpload(uploadId: string, params: CompleteUploadParams): Promise<ProcessResponse> {
+        try {
+            return await this.request<ProcessResponse>(`/uploads/${uploadId}/complete`, {
+                method: 'POST',
+                body: JSON.stringify(params),
+            });
+        } catch (e) {
+            if (e instanceof ApiError && e.status === 409) {
+                const jobId = (e.detail as { job_id?: string } | undefined)?.job_id;
+                if (jobId) return { job_id: jobId, status: 'queued', message: '' } as ProcessResponse;
+            }
+            throw e;
+        }
     }
 
     // --------------------------------------------------------------------------

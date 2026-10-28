@@ -58,6 +58,8 @@
   "errorFileType": "Apenas ficheiros .LAZ e .LAS sao aceites",
   "errorFileSize": "Ficheiro demasiado grande (max. 500MB)",
   "errorUpload": "Erro ao carregar ficheiro",
+  "uploadingPercent": "A carregar {{percent}} %",
+  "errorStorageUpload": "Não foi possível carregar o ficheiro para o armazenamento",
   "errorMissingCrs": "Metadados CRS em falta. Introduza o EPSG de origem antes de carregar.",
   "manualCrsLabel": "CRS de origem (obrigatório se o LAZ não tiver projeção)",
   "deleteLayer": "Eliminar camada",

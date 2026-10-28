@@ -58,6 +58,8 @@
   "errorFileType": "Seuls les fichiers .LAZ et .LAS sont acceptes",
   "errorFileSize": "Fichier trop volumineux (max 500 Mo)",
   "errorUpload": "Erreur lors de l'import du fichier",
+  "uploadingPercent": "Import en cours {{percent}} %",
+  "errorStorageUpload": "Impossible d'envoyer le fichier vers le stockage",
   "errorMissingCrs": "Métadonnées CRS manquantes. Entrez l'EPSG source avant de télécharger.",
   "manualCrsLabel": "CRS source (obligatoire si le LAZ n'a pas de projection)",
   "deleteLayer": "Supprimer la couche",

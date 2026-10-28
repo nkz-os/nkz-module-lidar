@@ -41,7 +41,7 @@ import {
 } from '@nekazari/ui-kit';
 import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
-import { lidarApi, JobFailedError } from '../../services/api';
+import { lidarApi, JobFailedError, ApiError } from '../../services/api';
 import type { ManualDownloadLink } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
@@ -142,6 +142,9 @@ const LidarLayerControl: React.FC = () => {
   const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+  // Object already stored by a direct upload whose complete step failed on the
+  // CRS check: retrying with a manual CRS only repeats complete, no new upload.
+  const pendingUploadRef = useRef<{ uploadId: string; name: string; size: number } | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   const COLOR_MODE_OPTIONS: { value: ColorMode; label: string; icon: string; desc: string }[] = [
@@ -258,32 +261,97 @@ const LidarLayerControl: React.FC = () => {
         throw new Error(t('errorMissingCrs'));
       }
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('parcel_id', selectedEntityId || 'unknown');
-      if (selectedEntityGeometry) {
-        formData.append('geometry_wkt', selectedEntityGeometry);
-      }
-      formData.append('config', JSON.stringify(processingConfig));
-      if (manualCrs.trim()) {
-        formData.append('source_crs', manualCrs.trim());
+      const parcelId = selectedEntityId || 'unknown';
+      const crs = manualCrs.trim();
+
+      // One controller for the whole upload + polling; cancels any previous run.
+      uploadAbortRef.current?.abort();
+      const controller = new AbortController();
+      uploadAbortRef.current = controller;
+
+      let jobId: string;
+      const pending = pendingUploadRef.current;
+      const reuse = pending && pending.name === file.name && pending.size === file.size ? pending : null;
+      if (!reuse) pendingUploadRef.current = null;
+
+      let uploadId: string | null = reuse ? reuse.uploadId : null;
+      let legacyJobId: string | null = null;
+
+      if (!uploadId) {
+        try {
+          const init = await lidarApi.initUpload(parcelId, file.name, file.size);
+          setUploadJobStatus({ progress: 0, message: t('uploadingPercent', { percent: 0 }) });
+          try {
+            await lidarApi.uploadToStorage(
+              init,
+              file,
+              (loaded, total) => {
+                const percent = Math.floor((loaded / total) * 100);
+                setUploadJobStatus({ progress: percent, message: t('uploadingPercent', { percent }) });
+              },
+              controller.signal,
+            );
+          } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') throw e;
+            throw new Error(t('errorStorageUpload'));
+          }
+          uploadId = init.upload_id;
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 503 && e.detail === 'direct_upload_unavailable') {
+            // Deployment without a public storage URL: legacy upload through the API.
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('parcel_id', parcelId);
+            if (selectedEntityGeometry) {
+              formData.append('geometry_wkt', selectedEntityGeometry);
+            }
+            formData.append('config', JSON.stringify(processingConfig));
+            if (crs) {
+              formData.append('source_crs', crs);
+            }
+            legacyJobId = (await lidarApi.uploadFile(formData)).job_id;
+          } else {
+            throw e;
+          }
+        }
       }
 
-      const uploadResponse = await lidarApi.uploadFile(formData);
+      if (legacyJobId) {
+        jobId = legacyJobId;
+      } else {
+        const id = uploadId as string;
+        try {
+          const done = await lidarApi.completeUpload(id, {
+            parcel_id: parcelId,
+            ...(selectedEntityGeometry ? { geometry_wkt: selectedEntityGeometry } : {}),
+            config: processingConfig as unknown as Record<string, unknown>,
+            ...(crs ? { source_crs: crs } : {}),
+          });
+          pendingUploadRef.current = null;
+          jobId = done.job_id;
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 422 || e.status === 400)) {
+            // Object stays in storage: ask for the CRS and retry only this step.
+            pendingUploadRef.current = { uploadId: id, name: file.name, size: file.size };
+            setRequiresManualCrs(true);
+          } else {
+            pendingUploadRef.current = null;
+          }
+          throw e;
+        }
+      }
+
+      setUploadJobStatus({ progress: 0, message: '' });
 
       // Poll until job completes (same flow as PNOA download)
-      // Cancel any previous upload polling
-      uploadAbortRef.current?.abort();
-      uploadAbortRef.current = new AbortController();
-
       const finalStatus = await lidarApi.pollJobStatus(
-        uploadResponse.job_id,
+        jobId,
         (status) => {
           setUploadJobStatus({ progress: status.progress, message: status.status_message || '' });
         },
         2000,
         300,
-        uploadAbortRef.current.signal,
+        controller.signal,
       );
 
       if (finalStatus.tileset_url) {
@@ -296,6 +364,7 @@ const LidarLayerControl: React.FC = () => {
       setManualCrs('');
     } catch (error: unknown) {
       setUploadJobStatus(null);
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       const msg = error instanceof Error ? error.message : t('errorUpload');
       setErrorWithTimeout(msg);
     } finally {
