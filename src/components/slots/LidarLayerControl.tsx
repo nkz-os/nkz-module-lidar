@@ -16,6 +16,7 @@ import {
   RefreshCw,
   CheckCircle,
   XCircle,
+  ExternalLink,
   Palette,
   Sparkles,
   Cloud,
@@ -40,7 +41,8 @@ import {
 } from '@nekazari/ui-kit';
 import { useTranslation } from '../../sdk';
 import { useLidarContext, ColorMode } from '../../services/lidarContext';
-import { lidarApi } from '../../services/api';
+import { lidarApi, JobFailedError } from '../../services/api';
+import type { ManualDownloadLink } from '../../services/api';
 import type { LazHeaderParseResult } from '../../workers/lazHeaderWorker';
 import LazWorker from '../../workers/lazHeaderWorker?worker&inline';
 
@@ -108,6 +110,7 @@ const LidarLayerControl: React.FC = () => {
   } = context;
 
   const [showSettings, _setShowSettings] = useState(false);
+  const [manualDownload, setManualDownload] = useState<ManualDownloadLink[] | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -205,9 +208,18 @@ const LidarLayerControl: React.FC = () => {
     }
     try {
       setErrorWithTimeout(null);
+      setManualDownload(null);
       await startProcessing();
       setAddingLayer(false);
     } catch (error: unknown) {
+      if (
+        error instanceof JobFailedError &&
+        error.status.error_code === 'manual_download_required' &&
+        error.status.manual_download_links?.length
+      ) {
+        setManualDownload(error.status.manual_download_links);
+        return;
+      }
       const msg = error instanceof Error ? error.message : t('errorProcessing');
       setErrorWithTimeout(msg);
     }
@@ -276,6 +288,7 @@ const LidarLayerControl: React.FC = () => {
       if (finalStatus.tileset_url) {
         await refreshLayers();
         setAddingLayer(false);
+        setManualDownload(null);
       }
       setUploadJobStatus(null);
       setRequiresManualCrs(false);
@@ -475,6 +488,45 @@ const LidarLayerControl: React.FC = () => {
               <p className="text-nkz-xs text-nkz-accent-strong">
                 {uploadJobStatus.message || t('processingPointCloud')}
               </p>
+            </Stack>
+          </div>
+        )}
+
+        {/* Manual CNIG download (the download centre now needs a human) */}
+        {manualDownload && (
+          <div className="bg-nkz-warning-soft rounded-nkz-md p-nkz-stack border border-nkz-warning">
+            <Stack gap="tight">
+              <p className="text-nkz-sm font-medium text-nkz-warning-strong">{t('manualDownload.title')}</p>
+              <p className="text-nkz-xs text-nkz-text-secondary">{t('manualDownload.body')}</p>
+              <ul className="flex flex-col gap-nkz-tight">
+                {manualDownload.map((link) => (
+                  <li key={`${link.series}-${link.sec}`} className="flex items-center gap-nkz-tight">
+                    <ExternalLink className="w-3 h-3 flex-shrink-0 text-nkz-accent-base" />
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-nkz-xs text-nkz-accent-base hover:underline break-all"
+                    >
+                      {link.name || t('manualDownload.tile', { sec: link.sec })}
+                    </a>
+                    <Badge intent="default">{link.series}</Badge>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-nkz-inline">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  leadingIcon={<Upload className="w-4 h-4" />}
+                >
+                  {t('manualDownload.upload')}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setManualDownload(null)}>
+                  {t('manualDownload.dismiss')}
+                </Button>
+              </div>
             </Stack>
           </div>
         )}

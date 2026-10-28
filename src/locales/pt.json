@@ -108,5 +108,10 @@
   "autoFitNoTerrain": "Nenhuma camada de elevação ativa no visualizador",
   "autoFitFailed": "Não foi possível ajustar a altura automaticamente",
   "addLayer": "Adicionar camada",
-  "cancelAddLayer": "Cancelar"
+  "cancelAddLayer": "Cancelar",
+  "manualDownload.title": "Transferência manual necessária",
+  "manualDownload.body": "O CNIG exige agora verificação humana para transferir. Abra a folha, clique em «Transferir» e carregue aqui o ficheiro LAZ.",
+  "manualDownload.tile": "Folha {{sec}}",
+  "manualDownload.upload": "Carregar o LAZ transferido",
+  "manualDownload.dismiss": "Fechar"
 }

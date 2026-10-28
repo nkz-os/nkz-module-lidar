@@ -30,6 +30,13 @@ export interface ProcessResponse {
     message: string;
 }
 
+export interface ManualDownloadLink {
+    series: 'cob3' | 'cob2' | string;
+    sec: string;
+    name?: string | null;
+    url: string;
+}
+
 export interface JobStatus {
     job_id: string;
     status: 'pending' | 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -39,6 +46,19 @@ export interface JobStatus {
     tileset_url?: string;
     tree_count?: number;
     point_count?: number;
+    error_code?: string | null;
+    manual_download_links?: ManualDownloadLink[] | null;
+}
+
+/** Thrown by pollJobStatus when the job ends failed/cancelled; carries the final status. */
+export class JobFailedError extends Error {
+    status: JobStatus;
+
+    constructor(status: JobStatus) {
+        super(status.error_message || 'Processing stopped');
+        this.name = 'JobFailedError';
+        this.status = status;
+    }
 }
 
 export interface CoverageResponse {
@@ -206,7 +226,7 @@ class LidarApiClient {
                     }
 
                     if (status.status === 'failed' || status.status === 'cancelled') {
-                        reject(new Error(status.error_message || 'Processing stopped'));
+                        reject(new JobFailedError(status));
                         return;
                     }
 
