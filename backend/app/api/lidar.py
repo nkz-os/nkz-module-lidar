@@ -1,11 +1,12 @@
 """LIDAR API endpoints backed by Orion-LD entities."""
 
+import asyncio
 import json
 import logging
 import os
 import tempfile
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from botocore.exceptions import ClientError
 from urllib.parse import urlsplit
@@ -546,6 +547,73 @@ async def list_jobs(
     }
 
 
+UPLOAD_BUCKET = "lidar-source-tiles"
+UPLOAD_TOO_LARGE_DETAIL = "File too large. Maximum size is 500MB."
+
+
+async def _create_upload_job(
+    *,
+    job_id: str,
+    s3_key: str,
+    parcel_id: str,
+    geometry_wkt: Optional[str],
+    config_dict: Dict[str, Any],
+    source_crs: Optional[str],
+    classification_mode: Optional[str],
+    has_rgb: Optional[bool],
+    tenant_id: str,
+    user_id: str,
+    message: str,
+) -> "ProcessResponse":
+    """Create the Orion job for an uploaded object and enqueue its worker.
+
+    Shared by /upload and /uploads/{id}/complete.
+    """
+    config_payload = {
+        **config_dict,
+        "uploaded_file_path": s3_key,
+        "source": "user_upload",
+        "source_crs": source_crs,
+        "classification_mode": classification_mode,
+        "has_rgb": has_rgb,
+    }
+    job_entity_id = await get_orion_client(tenant_id).create_processing_job(
+        job_id=job_id,
+        parcel_id=parcel_id,
+        geometry_wkt=geometry_wkt,
+        config=config_payload,
+        user_id=user_id,
+    )
+
+    # Enqueue job for worker
+    try:
+        queue = get_redis_queue()
+        rq_job = queue.enqueue(
+            process_uploaded_file,
+            job_entity_id,
+            tenant_id,
+            s3_key,
+            geometry_wkt,
+            job_timeout=settings.WORKER_TIMEOUT
+        )
+        # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
+        await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
+        logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
+
+    except Exception as e:
+        logger.error(f"Failed to enqueue upload job: {e}")
+        await get_orion_client(tenant_id).update_job(
+            job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Processing queue unavailable. Please try again later."
+        )
+
+    return ProcessResponse(job_id=job_id, status="queued", message=message)
+
+
 @router.post("/upload", response_model=ProcessResponse, status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3 per minute")
 async def upload_laz_file(
@@ -613,7 +681,7 @@ async def upload_laz_file(
                     if bytes_written > max_size:
                         raise HTTPException(
                             status_code=413,
-                            detail="File too large. Maximum size is 500MB."
+                            detail=UPLOAD_TOO_LARGE_DETAIL
                         )
                     f.write(chunk)
             
@@ -625,67 +693,196 @@ async def upload_laz_file(
             # Upload the file to MinIO temp location so the worker can download it
             from app.services.storage import storage_service
             s3_key = f"user_uploads/{tenant_id}/{job_id}/upload.{file_ext}"
-            storage_service.ensure_bucket("lidar-source-tiles")
+            storage_service.ensure_bucket(UPLOAD_BUCKET)
             storage_service.upload_file(
-                bucket="lidar-source-tiles",
+                bucket=UPLOAD_BUCKET,
                 key=s3_key,
                 file_path=temp_file_path,
                 content_type="application/octet-stream"
             )
-            logger.info(f"Uploaded file stored in MinIO at lidar-source-tiles/{s3_key}")
+            logger.info(f"Uploaded file stored in MinIO at {UPLOAD_BUCKET}/{s3_key}")
             
             # Local temp file already uploaded to MinIO — ctx mgr handles cleanup
-
-            config_payload = {
-                **config_dict,
-                "uploaded_file_path": s3_key,
-                "source": "user_upload",
-                "source_crs": source_crs,
-                "classification_mode": classification_mode,
-                "has_rgb": has_rgb,
-            }
-            job_entity_id = await get_orion_client(tenant_id).create_processing_job(
+            return await _create_upload_job(
                 job_id=job_id,
+                s3_key=s3_key,
                 parcel_id=parcel_id,
                 geometry_wkt=geometry_wkt,
-                config=config_payload,
+                config_dict=config_dict,
+                source_crs=source_crs,
+                classification_mode=classification_mode,
+                has_rgb=has_rgb,
+                tenant_id=tenant_id,
                 user_id=current_user.get("sub", "unknown"),
-            )
-            
-            # Enqueue job for worker
-            try:
-                queue = get_redis_queue()
-                rq_job = queue.enqueue(
-                    process_uploaded_file,
-                    job_entity_id,
-                    tenant_id,
-                    s3_key,
-                    geometry_wkt,
-                    job_timeout=settings.WORKER_TIMEOUT
-                )
-                # Update statusMessage instead of rqJobId to avoid NGSI-LD context errors
-                await get_orion_client(tenant_id).update_job(job_entity_id, statusMessage=f"Queued RQ: {rq_job.id}")
-                logger.info(f"Upload job {job_entity_id} enqueued (RQ: {rq_job.id})")
-                
-            except Exception as e:
-                logger.error(f"Failed to enqueue upload job: {e}")
-                await get_orion_client(tenant_id).update_job(
-                    job_entity_id, status="failed", statusMessage=f"Failed to enqueue: {str(e)}"
-                )
-                
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Processing queue unavailable. Please try again later."
-                )
-            
-            return ProcessResponse(
-                job_id=job_id,
-                status="queued",
-                message="File uploaded and queued for processing. Poll /status/{job_id} for updates."
+                message="File uploaded and queued for processing. Poll /status/{job_id} for updates.",
             )
             
         except GeodesyValidationError as e:
             raise HTTPException(status_code=422, detail=str(e))
+
+
+# ============================================================================
+# Direct upload (browser -> object storage with a presigned POST)
+# ============================================================================
+
+class InitUploadRequest(BaseModel):
+    parcel_id: str
+    filename: str
+    size_bytes: int
+
+
+class InitUploadResponse(BaseModel):
+    upload_id: str
+    url: str
+    fields: Dict[str, str]
+    expires_in: int
+
+
+class CompleteUploadRequest(BaseModel):
+    parcel_id: str
+    geometry_wkt: Optional[str] = None
+    config: Dict[str, Any] = Field(default_factory=dict)
+    source_crs: Optional[str] = None
+    classification_mode: Optional[str] = "detect"
+    has_rgb: Optional[bool] = True
+
+
+@router.post("/uploads/init", response_model=InitUploadResponse)
+@limiter.limit("3 per minute")
+async def init_direct_upload(
+    request: Request,
+    body: InitUploadRequest,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Issue a presigned POST so the browser uploads a LAZ/LAS straight to storage."""
+    ext = body.filename.lower().rsplit(".", 1)[-1] if "." in body.filename else ""
+    if ext not in ("laz", "las"):
+        raise HTTPException(status_code=400, detail="Only .LAZ and .LAS files are supported")
+    if body.size_bytes <= 0:
+        raise HTTPException(status_code=400, detail="Invalid file size")
+    if body.size_bytes > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
+    if not settings.MINIO_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=503, detail="direct_upload_unavailable")
+
+    from app.services.direct_upload import DIRECT_UPLOAD_EXPIRES_S, presign_upload_post
+    from app.services.storage import storage_service
+
+    storage_service.ensure_bucket(UPLOAD_BUCKET)
+    upload_id = str(uuid4())
+    key = f"user_uploads/{tenant_id}/{upload_id}/upload.{ext}"
+    signed = presign_upload_post(UPLOAD_BUCKET, key, settings.MAX_UPLOAD_SIZE)
+    return InitUploadResponse(
+        upload_id=upload_id,
+        url=signed["url"],
+        fields=signed["fields"],
+        expires_in=DIRECT_UPLOAD_EXPIRES_S,
+    )
+
+
+def _find_uploaded_key(storage_client, tenant_id: str, upload_id: str):
+    """Return (key, ContentLength) of the uploaded object, or None.
+
+    The key is always rebuilt from the request tenant; the extension is
+    unknown here so both are probed.
+    """
+    for ext in ("laz", "las"):
+        key = f"user_uploads/{tenant_id}/{upload_id}/upload.{ext}"
+        try:
+            head = storage_client.head_object(Bucket=UPLOAD_BUCKET, Key=key)
+        except ClientError as e:
+            code = str(e.response.get("Error", {}).get("Code", ""))
+            if code in ("404", "NoSuchKey", "NotFound"):
+                continue
+            raise
+        return key, int(head.get("ContentLength", 0))
+    return None
+
+
+@router.post(
+    "/uploads/{upload_id}/complete",
+    response_model=ProcessResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@limiter.limit("10 per minute")
+async def complete_direct_upload(
+    request: Request,
+    upload_id: str,
+    body: CompleteUploadRequest,
+    current_user: dict = Depends(require_auth),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Validate an uploaded object and start processing.
+
+    If CRS validation fails (422/400) the object is kept so the client can
+    call this endpoint again with `source_crs`, without uploading again.
+    """
+    try:
+        upload_id = str(UUID(upload_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid upload id")
+
+    try:
+        geometry_wkt = validate_crop_geometry(body.geometry_wkt)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_geometry", "message": str(e)},
+        )
+
+    from app.services.storage import storage_service
+
+    try:
+        found = _find_uploaded_key(storage_service.client, tenant_id, upload_id)
+    except ClientError as e:
+        logger.error(f"Storage error checking upload {upload_id}: {e}")
+        raise HTTPException(status_code=502, detail="Storage error")
+    if found is None:
+        raise HTTPException(status_code=404, detail="upload_not_found")
+    s3_key, size = found
+
+    if size > settings.MAX_UPLOAD_SIZE:
+        storage_service.client.delete_object(Bucket=UPLOAD_BUCKET, Key=s3_key)
+        raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
+
+    # Idempotency: the job id equals the upload id. Only a 404 means "no job".
+    try:
+        await get_orion_client(tenant_id).get_job(f"urn:ngsi-ld:DataProcessingJob:{upload_id}")
+    except Exception as e:
+        if " 404" not in str(e):
+            logger.error(f"Orion error checking job {upload_id}: {e}")
+            raise HTTPException(status_code=503, detail="Job store unavailable. Please try again later.")
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "already_completed", "job_id": upload_id},
+        )
+
+    file_ext = s3_key.rsplit(".", 1)[-1]
+    with tempfile.TemporaryDirectory(prefix="lidar_upload_") as temp_dir:
+        local_path = os.path.join(temp_dir, f"upload.{file_ext}")
+        try:
+            await asyncio.to_thread(storage_service.client.download_file, UPLOAD_BUCKET, s3_key, local_path)
+            await asyncio.to_thread(inspect_laz_crs, local_path, source_crs_override=body.source_crs)
+        except GeodesyValidationError as e:
+            msg = str(e)
+            code = "crs_required" if msg.startswith("CRS_MISSING") else "crs_invalid"
+            raise HTTPException(status_code=422, detail={"code": code, "message": msg})
+
+    return await _create_upload_job(
+        job_id=upload_id,
+        s3_key=s3_key,
+        parcel_id=body.parcel_id,
+        geometry_wkt=geometry_wkt,
+        config_dict=body.config,
+        source_crs=body.source_crs,
+        classification_mode=body.classification_mode,
+        has_rgb=body.has_rgb,
+        tenant_id=tenant_id,
+        user_id=current_user.get("sub", "unknown"),
+        message="Upload received and queued for processing. Poll /status/{job_id} for updates.",
+    )
 
 
 # ============================================================================

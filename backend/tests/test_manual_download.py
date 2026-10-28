@@ -130,14 +130,6 @@ def _import_with_stubs(monkeypatch, *names):
     return mods
 
 
-@pytest.fixture(scope="module")
-def api_module():
-    # Imported once: the module registers Prometheus metrics at import time.
-    with pytest.MonkeyPatch.context() as mp:
-        (api,) = _import_with_stubs(mp, "app.api.lidar")
-    return api
-
-
 class TestPipeline:
     def test_phase_a_propagates_and_skips_tile_cache(self, monkeypatch, tmp_path):
         (pl,) = _import_with_stubs(monkeypatch, "app.services.lidar_pipeline")
