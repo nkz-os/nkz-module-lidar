@@ -105,6 +105,14 @@ class ProcessResponse(BaseModel):
     message: str
 
 
+class ManualDownloadLink(BaseModel):
+    """CNIG detail page where a person can download one tile."""
+    series: str
+    sec: str
+    name: Optional[str] = None
+    url: str
+
+
 class JobStatusResponse(BaseModel):
     """Response for job status query."""
     job_id: str
@@ -115,6 +123,8 @@ class JobStatusResponse(BaseModel):
     tileset_url: Optional[str]
     tree_count: Optional[int]
     point_count: Optional[int]
+    error_code: Optional[str] = None
+    manual_download_links: Optional[List[ManualDownloadLink]] = None
 
 
 class CoverageCheckRequest(BaseModel):
@@ -153,8 +163,37 @@ def get_redis_queue() -> Queue:
     return Queue(settings.WORKER_QUEUE_NAME, connection=redis_conn)
 
 
+_NKZ_NS = "https://nkz-os.org/ns/"
+KNOWN_ERROR_CODES = {"manual_download_required"}
+CNIG_LINK_PREFIX = "https://centrodedescargas.cnig.es/"
+
+
 def _prop(entity: Dict[str, Any], key: str, default: Any = None) -> Any:
-    return entity.get(key, {}).get("value", default)
+    # Orion may return a custom term compact, as a full IRI, or as nkz:<term>.
+    for k in (key, f"{_NKZ_NS}{key}", f"nkz:{key}"):
+        attr = entity.get(k)
+        if isinstance(attr, dict) and "value" in attr:
+            return attr["value"]
+    return default
+
+
+def _safe_manual_links(raw: Any) -> Optional[List[ManualDownloadLink]]:
+    """Keep only well-formed links that point at the CNIG download centre."""
+    if not isinstance(raw, list):
+        return None
+    links: List[ManualDownloadLink] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.startswith(CNIG_LINK_PREFIX):
+            logger.warning("Dropping manual download link with unexpected host")
+            continue
+        try:
+            links.append(ManualDownloadLink(**item))
+        except Exception:
+            continue
+    return links or None
 
 
 # ============================================================================
@@ -302,11 +341,18 @@ async def get_job_status(
     except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    status_message = _prop(job, "statusMessage")
+    error_code = status_message if status_message in KNOWN_ERROR_CODES else None
     return JobStatusResponse(
         job_id=job_id,
         status=_prop(job, "status", "queued"),
         progress=_prop(job, "progress", 0),
-        status_message=_prop(job, "statusMessage"),
+        status_message=status_message,
+        error_code=error_code,
+        manual_download_links=(
+            _safe_manual_links(_prop(job, "manualDownloadLinks"))
+            if error_code == "manual_download_required" else None
+        ),
         error_message=_prop(job, "errorMessage"),
         tileset_url=_prop(job, "tilesetUrl"),
         tree_count=_prop(job, "treeCount"),

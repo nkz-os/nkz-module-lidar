@@ -54,6 +54,20 @@ _LAZ_NAME_RE = re.compile(r'(PNOA[^"<>\s]+\.LAZ)')
 _SEARCH_OFFSETS = [(0.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 0.0), (-1.0, 0.0)]
 
 
+class ManualDownloadRequired(Exception):
+    """Tiles exist but the CNIG download endpoint now demands a human.
+
+    ``links`` lists the public detail pages (one per tile) where a person can
+    pass the verification in their own browser and download the LAZ.
+    """
+
+    def __init__(self, links: List[dict]):
+        self.links = links
+        super().__init__(
+            f"CNIG requires manual download ({len(links)} tile page(s))"
+        )
+
+
 class PNOADownloader:
     """Download PNOA LiDAR LAZ tiles via the CNIG Centro de Descargas."""
 
@@ -64,6 +78,7 @@ class PNOADownloader:
         })
         self._session_ready = False
         self.last_attribution: Optional[str] = None
+        self._walled_secs: set = set()
 
     # ── public ────────────────────────────────────────────────────────────
     def download(self, geometry_wkt: str, output_dir: str) -> Optional[str]:
@@ -74,6 +89,8 @@ class PNOADownloader:
         first tile is returned (multi-tile merge is out of scope for now).
         """
         self._ensure_session()
+        self._walled_secs = set()
+        manual_links: List[dict] = []
 
         lon, lat = self._centroid_lonlat(geometry_wkt)
         if lon is None:
@@ -87,11 +104,21 @@ class PNOADownloader:
                 continue
             logger.info("[PNOA] %s tiles: %s", cov, tiles)
             for sec, filename in tiles:
+                manual_links.append({
+                    "series": cov,
+                    "sec": sec,
+                    "name": filename,
+                    "url": f"{BASE_URL}/detalleArchivo?sec={sec}",
+                })
+            for sec, filename in tiles:
                 path = self._download_sec(sec, filename, output_dir)
                 if path:
                     self.last_attribution = attribution
                     return path
             logger.warning("[PNOA] %s tiles found but none downloaded", cov)
+        if self._walled_secs:
+            # Tiles exist but the download endpoint refused us (captcha wall).
+            raise ManualDownloadRequired(manual_links)
         return None
 
     # ── session ───────────────────────────────────────────────────────────
@@ -121,8 +148,11 @@ class PNOADownloader:
             return None, None
 
     # ── search ────────────────────────────────────────────────────────────
-    def _search_tiles(self, lon: float, lat: float, cod_serie: str) -> List[Tuple[str, str]]:
-        """Find (sec, filename) tiles covering a point via the CNIG search."""
+    def _search_tiles(self, lon: float, lat: float, cod_serie: str) -> List[Tuple[str, Optional[str]]]:
+        """Find (sec, filename) tiles covering a point via the CNIG search.
+
+        ``filename`` is None when the search result does not name the tile.
+        """
         geojson = json.dumps({
             "type": "FeatureCollection",
             "features": [{
@@ -149,14 +179,19 @@ class PNOADownloader:
             html = resp.text
             secs = _DATA_SEC_RE.findall(html)
             names = _LAZ_NAME_RE.findall(html)
-            for sec in secs:
-                found[sec] = names[0] if names else f"pnoa-{sec}"
+            for i, sec in enumerate(secs):
+                if len(names) == len(secs):
+                    found[sec] = names[i]
+                elif len(secs) == 1 and names:
+                    found[sec] = names[0]
+                else:
+                    found[sec] = None
         except requests.RequestException as exc:
             logger.warning("[PNOA] search %s failed: %s", cod_serie, exc)
         return list(found.items())
 
     # ── download ──────────────────────────────────────────────────────────
-    def _download_sec(self, sec: str, filename: str, output_dir: str) -> Optional[str]:
+    def _download_sec(self, sec: str, filename: Optional[str], output_dir: str) -> Optional[str]:
         """Download one tile by its internal ``sec`` id (2-step POST)."""
         try:
             # 1. resolve download token
@@ -177,12 +212,15 @@ class PNOADownloader:
             )
             if resp2.status_code != 200:
                 logger.warning("[PNOA] descargaDir %s -> %s", sec, resp2.status_code)
+                if resp2.status_code == 403:
+                    self._walled_secs.add(sec)
                 return None
             if "attachment" not in resp2.headers.get("Content-Disposition", ""):
                 # HTML error page / license wall, not a LAZ
                 head = resp2.content[:512] if not getattr(resp2, "_consumed", False) else b""
                 if head and b"<html" in head.lower():
                     logger.warning("[PNOA] descargaDir returned HTML for %s", sec)
+                    self._walled_secs.add(sec)
                     return None
 
             safe_name = filename or f"pnoa_{sec}.laz"

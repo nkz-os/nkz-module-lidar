@@ -105,6 +105,16 @@ def _mark_orion_job_failed(job_entity_id: str, tenant_id: str, error_message: st
     from app.services.orion_client import get_orion_client
 
     client = get_orion_client(tenant_id)
+    # The pipeline already recorded a terminal state with a stable code and
+    # user-facing links; do not replace it with a generic failure.
+    try:
+        current = client.get_job_sync(job_entity_id) or {}
+        current_msg = (current.get("statusMessage") or {}).get("value")
+    except Exception:
+        current_msg = None
+    if current_msg == "manual_download_required":
+        logger.info("Keeping manual_download_required state for %s", job_entity_id)
+        return
     updates = {
         "status": "failed",
         "progress": 100,

@@ -42,9 +42,13 @@ from app.services.geodesy_validator import GeodesyValidationError, inspect_laz_c
 from app.services.lidar_info import parse_bounds
 from app.services.parcel_ref import extract_parcel_ref
 from app.services.orion_client import get_orion_client
+from app.services.pnoa_downloader import ManualDownloadRequired
 from app.services.pnoa_indexer import PNOAIndexer
 from app.services.storage import storage_service
 from app.services.tile_cache import tile_cache
+
+# Stable machine-readable statusMessage for jobs that need a human download.
+MANUAL_DOWNLOAD_CODE = "manual_download_required"
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +207,17 @@ class LidarPipeline:
             
             return result
             
+        except ManualDownloadRequired as e:
+            logger.warning("Job %s needs a manual CNIG download", self.job_id)
+            get_orion_client(self.tenant_id).update_job_sync(
+                self.job_id,
+                status="failed",
+                progress=0,
+                statusMessage=MANUAL_DOWNLOAD_CODE,
+                manualDownloadLinks=e.links,
+                completedAt=datetime.utcnow().isoformat() + "Z",
+            )
+            raise
         except Exception as e:
             logger.exception(f"Pipeline failed for job {self.job_id}")
             self.update_job_status("failed", 0, "Pipeline failed", str(e))
@@ -227,6 +242,8 @@ class LidarPipeline:
         if laz_url.startswith(('http://', 'https://')):
             logger.info(f"Getting tile from cache or downloading: {laz_url}")
             # Try PNOADownloader first (CNIG search + 2-step download)
+            # ManualDownloadRequired is deliberately not caught here: the index
+            # URL below is dead, so the job must surface the manual links.
             from app.services.pnoa_downloader import get_pnoa_downloader
             pnoa_result = get_pnoa_downloader().download(geometry_wkt or "", self.work_dir)
             if pnoa_result:
